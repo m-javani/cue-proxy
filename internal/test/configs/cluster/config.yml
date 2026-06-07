@@ -1,0 +1,69 @@
+# Copyright 2026 M. Javani
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+node_id: {{.NodeName}}
+data_dir: ./data
+
+cluster:
+  listen_addr: "0.0.0.0"
+  quic_port: 8323
+  cert_path: "./certs/{{.NodeName}}.pem"
+  key_path: "./certs/{{.NodeName}}_key.pem"
+  ca_path: "./certs/ca_cert.pem"
+  initial_voters: {{.InitialVoters}}
+  peers: {{.Peers}}
+  snapshot_interval_sec: 120
+  snapshot_trigger_count: 100000
+  wal_flush_threshold: 50000
+  dlq_max_size_bytes: 10485760
+  raft_tick_ms: 100
+  raft_heartbeat_tick: 10
+  raft_election_tick: 100
+
+proxy:
+  addr: "0.0.0.0"
+  port: 8322
+  cert_path: "./certs/{{.NodeName}}.pem"
+  key_path: "./certs/{{.NodeName}}_key.pem"
+  ca_path: "./certs/ca_cert.pem"
+
+wal:
+  compact_after_bytes: 104857600
+  sync_interval: "1s"
+
+logging:
+  level: "debug"
+  format: "json"
+  output_path: "stdout"
+
+partition:
+  active_queue_capacity: 1000000
+  retry_base_delay_ms: 1000
+  max_retries: 3
+  max_backoff_ms: 2000
+  dispatch_batch_size: 128
+  dlq_max_bytes: 10485760
+  dlq_max_age_ms: 86400000
+
+api:
+  listen_addr: "0.0.0.0"
+  api_port: 8321
+  token_path: "{{.AuthPath}}"
+  timeout_seconds: 30
+
+address_resolver:
+  type: service
+
+tls_verifier:
+  type: cn

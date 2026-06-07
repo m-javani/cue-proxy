@@ -1,0 +1,66 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+README*
+
+# Build artifacts
+*.test
+*.log
+coverage.*
+*.cov
+*.out
+*.prof
+tmp/
+*.tmp
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+
+# OS
+.DS_Store
+Thumbs.db
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Certificates (generate at runtime)
+certs/
+*.crt
+*.key
+*.pem
+
+# Local files
+Dockerfile.local
+.dockerignore.local
+.env
+.env.*
+*.local
+
+# Binaries
+cue
+cueproxy
+*.exe
+
+# Test files
+*_test.go
+test/
+tests/
+integration/
+
+# Docker related
+.dockerignore
+docker-compose*.yml
+docker-compose*.yaml

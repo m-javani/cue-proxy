@@ -1,0 +1,48 @@
+# Copyright 2026 M. Javani
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+api:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout_sec: 45
+  write_timeout_sec: 0
+  idle_timeout_sec: 300
+  ws_read_timeout_sec: 0
+  ws_write_timeout_sec: 30
+  ws_read_limit_bytes: 32768 # 32KB
+  default_max_inflights: 10
+  auth_path: "./configs/auth.yml"
+  tls_enabled: false  # Set to true to enable HTTPS for API
+  cert_path: "certs/api-cert.pem"
+  key_path: "certs/api-key.pem"
+
+cluster:
+  quic_addr: "0.0.0.0"
+  quic_port: 8322
+  cluster_seeds:
+    - node1
+    - node2
+    - node3
+  cert_path: "certs/cluster-cert.pem"
+  key_path: "certs/cluster-key.pem"
+  ca_path: "certs/cluster-ca.pem"
+  address_resolver:
+    type: service  # service, dns, static
+    # config:
+    #   domain: ""
+    #   port: 8323
+  tls_verifier:
+    type: cn  # cn, dns, spiffe
+    # config:
+    #   domain: "localhost"
