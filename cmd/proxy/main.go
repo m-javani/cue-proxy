@@ -79,7 +79,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to build config: %v\n", err)
 		os.Exit(1)
 	}
-	defer logger.Sync()
+	defer func() {
+		_ = logger.Sync()
+	}()
 
 	// --- Run Proxy (Blocking) ---
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

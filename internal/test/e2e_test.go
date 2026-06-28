@@ -37,7 +37,7 @@ func TestFullSystemFlow(t *testing.T) {
 	caCertDir := filepath.Join(integrationDir, "cert")
 
 	logger, cluster, client, _ := SetupFullTestSystem(t, ctx, caCertDir, domain)
-	defer cluster.Terminate(ctx)
+	defer func() { _ = cluster.Terminate(ctx) }()
 
 	// ============================================
 	// Topic Management
@@ -62,11 +62,11 @@ func TestFullSystemFlow(t *testing.T) {
 	topic := "orders"
 	consumerID := client.AddConsumer(topic)
 	t.Logf("Subscribed consumer %d to topics: %s", consumerID, topic)
-	client.Start()
+	_ = client.Start()
 
 	// Push jobs
-	client.AddJob("order-1", "orders", []byte(`{"item":"book"}`))
-	client.AddJob("order-2", "orders", []byte(`{"item":"pen"}`))
+	_ = client.AddJob("order-1", "orders", []byte(`{"item":"book"}`))
+	_ = client.AddJob("order-2", "orders", []byte(`{"item":"pen"}`))
 
 	// Verify
 	client.AssertAllJobsReceivedE2E(t, 5*time.Second)
@@ -77,7 +77,7 @@ func TestFullSystemFlow(t *testing.T) {
 	require.Equal(t, "order-2", received[1].JobID)
 
 	time.Sleep(500 * time.Millisecond)
-	client.StopConsumer(consumerID)
+	_ = client.StopConsumer(consumerID)
 }
 
 // ============================================
@@ -92,7 +92,7 @@ func TestTopicIsolation(t *testing.T) {
 	caCertDir := filepath.Join(integrationDir, "cert")
 
 	_, cluster, client, _ := SetupFullTestSystem(t, ctx, caCertDir, domain)
-	defer cluster.Terminate(ctx)
+	defer func() { _ = cluster.Terminate(ctx) }()
 
 	// ============================================
 	// Add Topics
@@ -111,10 +111,10 @@ func TestTopicIsolation(t *testing.T) {
 	consumer1 := client.AddConsumer("orders")
 	consumer2 := client.AddConsumer("shipments")
 
-	client.Start()
+	_ = client.Start()
 
-	client.AddJob("order-only", "orders", nil)
-	client.AddJob("ship-only", "shipments", nil)
+	_ = client.AddJob("order-only", "orders", nil)
+	_ = client.AddJob("ship-only", "shipments", nil)
 
 	time.Sleep(2 * time.Second)
 
@@ -140,7 +140,7 @@ func TestMultiConsumers(t *testing.T) {
 	caCertDir := filepath.Join(integrationDir, "cert")
 
 	_, cluster, client, _ := SetupFullTestSystem(t, ctx, caCertDir, domain)
-	defer cluster.Terminate(ctx)
+	defer func() { _ = cluster.Terminate(ctx) }()
 
 	// ============================================
 	// Add Topics
@@ -161,11 +161,11 @@ func TestMultiConsumers(t *testing.T) {
 	for i := range 3 {
 		consumers[i] = client.AddConsumer("orders")
 	}
-	client.Start()
+	_ = client.Start()
 
 	// Push 9 jobs
 	for i := range 9 {
-		client.AddJob(
+		_ = client.AddJob(
 			fmt.Sprintf("multi-job-%d", i),
 			"orders",
 			fmt.Appendf(nil, `{"seq":%d}`, i),
@@ -176,6 +176,6 @@ func TestMultiConsumers(t *testing.T) {
 
 	// Cleanup
 	for _, consumerID := range consumers {
-		client.StopConsumer(consumerID)
+		_ = client.StopConsumer(consumerID)
 	}
 }

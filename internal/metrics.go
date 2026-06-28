@@ -46,7 +46,7 @@ type ClusterMetrics struct {
 	leaderChangedTotal prometheus.Counter
 
 	// WAL
-	walFlushCountTotal  prometheus.Counter
+	walFlushTotal       prometheus.Counter
 	lastAppliedWalIndex prometheus.Gauge
 }
 
@@ -112,6 +112,17 @@ func GetClusterMetrics() *ClusterMetrics {
 				Name: "cluster_leader_changed_total",
 				Help: "Total number of leadership changes",
 			}),
+
+			walFlushTotal: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "cluster_wal_flush_total",
+				Help: "Total number of wal flushes",
+			}),
+			lastAppliedWalIndex: promauto.NewGauge(
+				prometheus.GaugeOpts{
+					Name: "cluster_last_applied_wal_index",
+					Help: "Current raft last index applied to state",
+				},
+			),
 		}
 	})
 	return clusterMetricsInstance

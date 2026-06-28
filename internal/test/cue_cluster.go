@@ -180,9 +180,6 @@ func WaitForClusterReady(t *testing.T, cluster *Cluster, timeout time.Duration) 
 			return
 		}
 
-		if allReady {
-			// t.Log("  All nodes healthy, waiting for leader election...")
-		}
 	}
 
 	t.Fatalf("❌ Cluster not ready after %v", timeout)

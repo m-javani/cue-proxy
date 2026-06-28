@@ -157,7 +157,7 @@ func (c *consumer) stop() {
 	c.stopOnce.Do(func() {
 		c.connMu.Lock()
 		if c.conn != nil {
-			c.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "test done"), time.Now().Add(time.Second))
+			_ = c.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "test done"), time.Now().Add(time.Second))
 			c.conn.Close()
 			c.conn = nil
 		}
@@ -336,13 +336,13 @@ func (c *Client) runConsumer(cons *consumer) {
 		default:
 		}
 
-		conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 
 		var delivery pkg.ToConsumerDelivery
 		if err := conn.ReadJSON(&delivery); err != nil {
-			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				// c.logger.Sugar().Debugf("websocket closed - consumer_id: %d", cons.id)
-			}
+			// if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+			// c.logger.Sugar().Debugf("websocket closed - consumer_id: %d", cons.id)
+			// }
 			return
 		}
 
@@ -428,38 +428,6 @@ func (c *Client) AssertAllJobsReceivedE2E(t *testing.T, timeout time.Duration) {
 			// c.reportMissingJobs(t)
 			return
 		}
-	}
-}
-
-func (c *Client) reportMissingJobs(t *testing.T) {
-	t.Helper()
-
-	c.trackingMu.RLock()
-	sent := len(c.sentJobs)
-	receivedCount := len(c.receivedJobs)
-	c.trackingMu.RUnlock()
-
-	t.Logf("Sent: %d jobs | Received: %d jobs", sent, receivedCount)
-
-	c.trackingMu.RLock()
-	for jobID, job := range c.sentJobs {
-		if !job.Received {
-			t.Logf("   ✗ Missing: %s (topic: %s)", jobID, job.Topic)
-		}
-	}
-	c.trackingMu.RUnlock()
-
-	// Multi-consumer debug info
-	t.Log("Received by consumer:")
-	byConsumer := make(map[int]int)
-	c.trackingMu.RLock()
-	for _, r := range c.receivedJobs {
-		byConsumer[r.ConsumerID]++
-	}
-	c.trackingMu.RUnlock()
-
-	for cid, count := range byConsumer {
-		t.Logf("   Consumer %d: %d jobs", cid, count)
 	}
 }
 

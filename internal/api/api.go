@@ -197,10 +197,12 @@ func (p *ProxyApi) withLeaderCheck(handler http.HandlerFunc) http.HandlerFunc {
 		if !p.leaderAvailable.Load() {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{
+			if err := json.NewEncoder(w).Encode(map[string]string{
 				"error":   "service_unavailable",
 				"message": "The service is temporarily unavailable. Please try again later.",
-			})
+			}); err != nil {
+				p.logger.Sugar().Debugf("failed to encode error response: %v", err)
+			}
 			return
 		}
 		handler(w, r)
@@ -209,7 +211,7 @@ func (p *ProxyApi) withLeaderCheck(handler http.HandlerFunc) http.HandlerFunc {
 
 func (p *ProxyApi) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func (p *ProxyApi) MetricsHandler() http.Handler {
@@ -270,7 +272,7 @@ func (p *ProxyApi) AddTopicHandler(w http.ResponseWriter, r *http.Request) {
 		if resp.Status == model.ToProxyRespStatusSuccess {
 			p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/topic", "200").Inc()
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 		} else {
 			p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/topic", "400").Inc()
 			http.Error(w, resp.Error, http.StatusBadRequest)
@@ -328,11 +330,11 @@ func (p *ProxyApi) AddJobHandler(w http.ResponseWriter, r *http.Request) {
 		if resp.Status == model.ToProxyRespStatusSuccess {
 			p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/job", "200").Inc()
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "success", "job_id": req.Job.ID})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "job_id": req.Job.ID})
 		} else {
 			p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/job", "400").Inc()
 			http.Error(w, resp.Error, http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": resp.Error})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": resp.Error})
 		}
 	case <-time.After(30 * time.Second):
 		p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/job", "504").Inc()
@@ -356,7 +358,7 @@ func (p *ProxyApi) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(p.cfg.WSReadLimitBytes)
 	if p.cfg.WSReadTimeoutSec > 0 {
-		conn.SetReadDeadline(time.Now().Add(time.Duration(p.cfg.WSReadTimeoutSec)))
+		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(p.cfg.WSReadTimeoutSec)))
 	}
 	p.metrics.WebSocketConnections.Inc()
 	defer p.metrics.WebSocketConnections.Dec()
@@ -418,7 +420,7 @@ func (p *ProxyApi) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Reset read deadline after successful read
 		if p.cfg.WSReadTimeoutSec > 0 {
-			conn.SetReadDeadline(time.Now().Add(time.Duration(p.cfg.WSReadTimeoutSec)))
+			_ = conn.SetReadDeadline(time.Now().Add(time.Duration(p.cfg.WSReadTimeoutSec)))
 		}
 
 		if msg.Action == "ack" {

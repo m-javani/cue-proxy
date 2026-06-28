@@ -32,7 +32,6 @@ import (
 	"go.uber.org/zap"
 )
 
-
 // ClusterAgent is the main flat struct managing QUIC connections to all Cue nodes
 type ClusterAgent struct {
 	proxyID string
@@ -50,7 +49,6 @@ type ClusterAgent struct {
 	// Connection maps
 	sendConns     map[string]*quic.Conn // nodeID -> send (Proxy→Cue)
 	recvConns     map[string]*quic.Conn // nodeID -> recv (Cue→Proxy)
-	retiringConns []retiringConn
 	addressToNode map[string]string
 	nodeToAddr    map[string]string
 
@@ -87,14 +85,8 @@ type ClusterAgent struct {
 	reqIDCounter atomic.Uint64
 }
 
-type retiringConn struct {
-	timestamp time.Time
-	conn      *quic.Conn
-}
-
 const (
-	maxRetiringConnSize = 50
-	protocolVersion     = 1
+	protocolVersion = 1
 )
 
 // NewClusterAgent creates the agent
@@ -145,7 +137,6 @@ func NewClusterAgent(
 		logger:             logger,
 		ctx:                ctx,
 		cancel:             cancel,
-		retiringConns:      []retiringConn{},
 		mu:                 sync.RWMutex{},
 		currentLeader:      atomic.Value{},
 		leaderAvailable:    leaderAvailable,
@@ -198,10 +189,10 @@ func (a *ClusterAgent) Close() error {
 	defer a.mu.Unlock()
 
 	for _, conn := range a.sendConns {
-		conn.CloseWithError(0, "shutting down")
+		_ = conn.CloseWithError(0, "shutting down")
 	}
 	for _, conn := range a.recvConns {
-		conn.CloseWithError(0, "shutting down")
+		_ = conn.CloseWithError(0, "shutting down")
 	}
 
 	a.logger.Info("ClusterAgent closed")

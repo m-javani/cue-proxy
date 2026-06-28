@@ -815,7 +815,6 @@ func TestGetTLSConfig(t *testing.T) {
 	assert.Equal(t, expectedCurves, tlsConfig.CurvePreferences, "Curve preferences should match expected list")
 
 	// Check other settings
-	assert.True(t, tlsConfig.PreferServerCipherSuites, "Should prefer server cipher suites")
 	assert.False(t, tlsConfig.SessionTicketsDisabled, "Session tickets should be enabled")
 	assert.Equal(t, []string{"h2", "http/1.1"}, tlsConfig.NextProtos, "Should support HTTP/2 and HTTP/1.1")
 }

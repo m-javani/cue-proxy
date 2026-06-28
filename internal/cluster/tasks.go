@@ -175,7 +175,7 @@ func (a *ClusterAgent) syncConnectionsTask(awg *sync.WaitGroup, tick time.Durati
 			for nodeID := range a.sendConns {
 				if !slices.Contains(curVoterIDs, nodeID) {
 					if conn := a.sendConns[nodeID]; conn != nil {
-						conn.CloseWithError(0, "node removed from cluster")
+						_ = conn.CloseWithError(0, "node removed from cluster")
 					}
 					delete(a.sendConns, nodeID)
 					delete(a.nodeToAddr, nodeID)
@@ -186,7 +186,7 @@ func (a *ClusterAgent) syncConnectionsTask(awg *sync.WaitGroup, tick time.Durati
 			for nodeID := range a.recvConns {
 				if !slices.Contains(curVoterIDs, nodeID) {
 					if conn := a.recvConns[nodeID]; conn != nil {
-						conn.CloseWithError(0, "node removed from cluster")
+						_ = conn.CloseWithError(0, "node removed from cluster")
 					}
 					delete(a.recvConns, nodeID)
 					delete(a.nodeToAddr, nodeID)
@@ -241,7 +241,7 @@ func (a *ClusterAgent) heartbeatTask(awg *sync.WaitGroup, tick time.Duration) {
 			}
 
 			// Fire and forget
-			a.sendToLeader(&model.ProxyRequest{
+			_ = a.sendToLeader(&model.ProxyRequest{
 				RequestID:       a.nextRequestID(),
 				Type:            model.ReqHeartbeatReport,
 				HeartbeatReport: report,

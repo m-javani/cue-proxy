@@ -86,7 +86,7 @@ func (a *ClusterAgent) dialWithHandshake(remoteAddr, targetServerName string, co
 	// Handshake
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
-		conn.CloseWithError(0, "handshake stream failed")
+		_ = conn.CloseWithError(0, "handshake stream failed")
 		return nil, err
 	}
 	defer stream.Close()
@@ -147,7 +147,7 @@ func (a *ClusterAgent) sendRequest(conn *quic.Conn, req *model.ProxyRequest) err
 }
 
 func (a *ClusterAgent) handleRecvConnection(senderID string, conn *quic.Conn) {
-	defer conn.CloseWithError(0, "recv handler done")
+	defer func() { _ = conn.CloseWithError(0, "recv handler done") }()
 
 	for {
 		stream, err := conn.AcceptStream(a.ctx)
@@ -199,7 +199,7 @@ func (a *ClusterAgent) handleSingleStream(senderID string, stream *quic.Stream) 
 				}
 
 				// Fire and forget
-				a.sendToLeader(&model.ProxyRequest{
+				_ = a.sendToLeader(&model.ProxyRequest{
 					RequestID:       a.nextRequestID(),
 					Type:            model.ReqHeartbeatReport,
 					HeartbeatReport: report,

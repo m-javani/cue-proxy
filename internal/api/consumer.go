@@ -87,7 +87,11 @@ func (c *Consumer) WriteMessage(msg []byte) error {
 }
 
 func (c *Consumer) StartWriteLoop() {
-	defer func() { recover() }() // safety
+	defer func() {
+		if r := recover(); r != nil {
+			c.logger.Error("panic recovered: %v", zap.Any("panic", r))
+		}
+	}()
 
 	for {
 		select {
