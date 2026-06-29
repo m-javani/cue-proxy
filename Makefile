@@ -3,7 +3,7 @@ BUILD_DIR=.
 VERSION?=1
 TAG?=latest
 
-.PHONY: build run clean help docker-build docker-build-local
+.PHONY: build run clean help docker-build docker-build-local test test-sum
 
 build:
 	@echo "Building $(BINARY_NAME)..."
@@ -24,6 +24,14 @@ docker-build:
 	@echo "✅ Docker image built: $(BINARY_NAME):$(TAG)"
 	@docker images $(BINARY_NAME):$(TAG) --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 
+# Original test target with gotestsum
+test-sum:
+	@echo "🧪 Running unit tests with gotestsum..."
+	@gotestsum --format testname -- -p=1 -coverprofile=coverage.unit.cov -coverpkg=./internal/api,./internal/app,./internal/cluster,./internal/config,./internal/model ./...
+	@echo ""
+	@echo "✅ Unit tests complete"
+
+# Standard test target without gotestsum
 test:
 	@echo "🧪 Running unit tests with coverage..."
 	@go test -v -p=1 -coverprofile=coverage.unit.cov -coverpkg=./internal/api,./internal/app,./internal/cluster,./internal/config,./internal/model ./... 2>&1 | while IFS= read -r line; do \
@@ -75,7 +83,8 @@ help:
 	@echo "Available targets:"
 	@echo "  make build                    - Build static Linux binary"
 	@echo "  make docker-build             - Build Docker image (full build in container)"
-	@echo "  make test                     - Run unit tests with coverage"
+	@echo "  make test                     - Run unit tests with coverage (standard go test)"
+	@echo "  make test-sum                 - Run unit tests with gotestsum"
 	@echo "  make certs                    - Generate TLS certificates"
 	@echo "  make clean                    - Clean build artifacts"
 	@echo "  make license                  - Add license headers"

@@ -64,7 +64,7 @@ type options struct {
 
 func defaultOptions() *options {
 	return &options{
-		image:     "cue:latest",
+		image:     "mehdyjavany/cue:latest",
 		nodeCount: 3,
 	}
 }
@@ -398,7 +398,8 @@ func startNode(
 	}
 
 	req := testcontainers.ContainerRequest{
-		Image: image,
+		Image:           image,
+		AlwaysPullImage: true,
 		ExposedPorts: []string{
 			"8321/tcp",
 			"8322/udp",
