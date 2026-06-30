@@ -1,5 +1,5 @@
 BINARY_NAME=cueproxy
-BUILD_DIR=.
+BUILD_DIR=./build
 VERSION?=1
 TAG?=latest
 
@@ -60,7 +60,7 @@ clean:
 	@echo "Cleaning..."
 	@rm -rf ./certs
 	@rm -f coverage.unit.cov coverage.html
-	@rm -f $(BINARY_NAME)
+	@rm -f $(BUILD_DIR)/$(BINARY)
 	@go clean -testcache
 	@echo "Clean complete"
 
