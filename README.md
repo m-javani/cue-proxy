@@ -18,7 +18,7 @@ CueProxy handles all external communication, allowing you to:
 [![codecov](https://codecov.io/gh/m-javani/cue-proxy/graph/badge.svg)](https://app.codecov.io/gh/m-javani/cue-proxy)
 [![Go Report Card](https://goreportcard.com/badge/github.com/m-javani/cue-proxy)](https://goreportcard.com/report/github.com/m-javani/cue-proxy)
 [![Go Version](https://img.shields.io/badge/Go-1.26.3-blue)](https://golang.org/)
-[![Docker Pulls](https://img.shields.io/docker/pulls/m-javani/cue-proxy)](https://hub.docker.com/r/m-javani/cue-proxy)
+[![Docker Pulls](https://img.shields.io/docker/pulls/mehdyjavany/cue-proxy)](https://hub.docker.com/r/mehdyjavany/cue-proxy)
 
 ---
 
