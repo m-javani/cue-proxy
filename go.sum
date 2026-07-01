@@ -66,8 +66,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 h1:6E+4a0GO5zZEnZ81pIr0yLvtUWk2if982qA3F3QD6H4=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0/go.mod h1:zJYVVT2jmtg6P3p1VtQj7WsuWi/y4VnjVBn7F8KPB3I=
-github.com/m-javani/cue v0.1.0 h1:i44cAIzMTx/YTaFv1zvKT0JrpKlDFZ/tFOSOnE0jpFo=
-github.com/m-javani/cue v0.1.0/go.mod h1:1F4A9wlGb8Bc327gdGpygLzi14bCVrvRsO8IjTKiR2o=
+github.com/m-javani/cue v0.2.0 h1:7MB7QmlhDTANpL2f1HGdjqCdpzqxH87m546yUZ2+tOM=
+github.com/m-javani/cue v0.2.0/go.mod h1:1F4A9wlGb8Bc327gdGpygLzi14bCVrvRsO8IjTKiR2o=
 github.com/magiconair/properties v1.8.10 h1:s31yESBquKXCV9a/ScB3ESkOjUYYv+X0rg8SYxI99mE=
 github.com/magiconair/properties v1.8.10/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
 github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=
