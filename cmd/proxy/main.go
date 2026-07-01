@@ -24,7 +24,6 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/google/uuid"
 	"github.com/m-javani/cue-proxy/internal/app"
 	"github.com/m-javani/cue-proxy/internal/config"
 	"github.com/m-javani/cue/pkg/discovery"
@@ -49,7 +48,7 @@ func main() {
 	clusterKeyPath := flag.String("cluster-key", "", "Cluster TLS key path (overrides config)")
 	clusterCaPath := flag.String("cluster-ca", "", "Cluster CA certificate path (overrides config)")
 	clusterSeeds := flag.String("seed", "", "Comma-separated cluster seed nodes (e.g., node1,node2,node3)")
-	proxyID := flag.String("proxy-id", "", "Proxy ID (auto-generated if empty)")
+	proxyID := flag.String("proxy-id", "", "Proxy ID (REQUIRED, must match certificate identity)")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Proxy Server v%s\n\n", version)
@@ -57,11 +56,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  %s -config config.yml\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s -api-port 8080 -quic-port 8322 -seed node1,node2,node3\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -proxy-id proxy1 -config config.yml\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -proxy-id node1 -api-port 8080 -quic-port 8322 -seed node2,node3\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -version\n", os.Args[0])
 	}
 	flag.Parse()
+
+	if *proxyID == "" {
+		fmt.Fprintf(os.Stderr, "ERROR: -proxy-id is required and must match the certificate identity\n")
+		flag.Usage()
+		os.Exit(1)
+	}
 
 	if *showVersion || *showVersionShort {
 		fmt.Printf("cueproxy version %s\n", version)
@@ -137,10 +142,8 @@ func buildConfig(
 		logger.Info("using default configuration")
 	}
 
-	// Override with CLI flags
-	if proxyID != "" {
-		cfg.ProxyID = proxyID
-	}
+	cfg.ProxyID = proxyID
+
 	if apiHost != "" {
 		cfg.API.Host = apiHost
 	}
@@ -178,12 +181,6 @@ func buildConfig(
 	if clusterSeeds != "" {
 		seeds := strings.Split(clusterSeeds, ",")
 		cfg.Cluster.ClusterSeeds = seeds
-	}
-
-	// Generate proxy ID if still empty
-	if cfg.ProxyID == "" {
-		cfg.ProxyID = uuid.New().String()[:8]
-		logger.Info("auto-generated proxy ID", zap.String("proxy_id", cfg.ProxyID))
 	}
 
 	logger.Info("configuration loaded",
