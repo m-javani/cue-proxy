@@ -16,10 +16,14 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
+	"slices"
+	"strconv"
 	"time"
 
 	"github.com/m-javani/cue-proxy/internal/model"
@@ -28,58 +32,105 @@ import (
 	"go.uber.org/zap"
 )
 
-func (a *ClusterAgent) dialSendConnection(ni PeerResolvedInfo) error {
+func (a *ClusterAgent) dialSendConnection(peer PeerInfo) error {
 
-	conn, err := a.dialWithHandshake(ni.Addr, ni.ServerName, ConnectionTypeInbound, ni.NodeID)
+	conn, err := a.dialWithHandshake(ConnectionTypeInbound, peer)
 	if err != nil {
-		return fmt.Errorf("dial to %s failed: %w", ni.Addr, err)
+		return fmt.Errorf("dial to %s failed: %w", peer.NodeID, err)
 	}
 
 	a.mu.Lock()
-	a.sendConns[ni.NodeID] = conn
+	a.sendConns[peer.NodeID] = conn
 	a.mu.Unlock()
 
 	return nil
 }
 
-func (a *ClusterAgent) dialRecvConnection(ni PeerResolvedInfo) error {
+func (a *ClusterAgent) dialRecvConnection(peer PeerInfo) error {
 
-	conn, err := a.dialWithHandshake(ni.Addr, ni.ServerName, ConnectionTypeOutbound, ni.NodeID)
+	conn, err := a.dialWithHandshake(ConnectionTypeOutbound, peer)
 	if err != nil {
-		return fmt.Errorf("dial to %s failed: %w", ni.Addr, err)
+		return fmt.Errorf("dial to %s failed: %w", peer.NodeID, err)
 	}
 
 	a.mu.Lock()
-	a.recvConns[ni.NodeID] = conn
+	a.recvConns[peer.NodeID] = conn
 	a.mu.Unlock()
 
-	go a.handleRecvConnection(ni.NodeID, conn)
+	go a.handleRecvConnection(peer.NodeID, conn)
 	return nil
 }
 
-func (a *ClusterAgent) dialWithHandshake(remoteAddr, targetServerName string, connType ConnectionType, targetNodeID string) (*quic.Conn, error) {
+func (s *ClusterAgent) VerifyTLSIdentity(cert *x509.Certificate, expected TLSIdentity) error {
+	switch expected.Kind {
+	case IdentityDNS:
+		if slices.Contains(cert.DNSNames, expected.Value) {
+			return nil
+		}
+		return fmt.Errorf("certificate does not contain expected DNS SAN: %s. cert.DNSNames: %+v", expected.Value, cert.DNSNames)
+
+	case IdentityIP:
+		expectedIP := net.ParseIP(expected.Value)
+		if expectedIP == nil {
+			return fmt.Errorf("invalid IP in expected identity: %s", expected.Value)
+		}
+		for _, ip := range cert.IPAddresses {
+			if ip.Equal(expectedIP) {
+				return nil
+			}
+		}
+		return fmt.Errorf("certificate does not contain expected IP SAN: %s", expected.Value)
+
+	case IdentitySPIFFE:
+		for _, uri := range cert.URIs {
+			if uri.String() == expected.Value {
+				return nil
+			}
+		}
+		return fmt.Errorf("certificate does not contain expected SPIFFE URI: %s", expected.Value)
+
+	default:
+		return fmt.Errorf("unsupported identity kind: %d", expected.Kind)
+	}
+}
+
+func (a *ClusterAgent) dialWithHandshake(connType ConnectionType, peer PeerInfo) (*quic.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	tlsConfig := a.clientTLSConfig.Clone()
-	tlsConfig.ServerName = targetServerName
+	remoteAddr := net.JoinHostPort(peer.IP, strconv.Itoa(int(peer.Port)))
 
-	// Override VerifyPeerCertificate to capture the target node ID
-	if a.tlsVerifier != nil {
-		// Disable Go's built-in verification so our custom verifier runs
-		tlsConfig.InsecureSkipVerify = true
-
-		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-			err := a.tlsVerifier.VerifyPeer(rawCerts, targetNodeID)
-			if err != nil {
-				a.logger.Warn("TLS verification error in connect:", zap.Error(err))
-			}
-			return err
+	tlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {
+		if len(cs.PeerCertificates) == 0 {
+			return fmt.Errorf("no peer certificate")
 		}
+		leaf := cs.PeerCertificates[0]
+
+		intermediates := x509.NewCertPool()
+		for _, cert := range cs.PeerCertificates[1:] {
+			intermediates.AddCert(cert)
+		}
+
+		// 1. Full chain validation
+		if _, err := leaf.Verify(x509.VerifyOptions{
+			Roots:         tlsConfig.RootCAs,
+			Intermediates: intermediates,
+		}); err != nil {
+			return fmt.Errorf("certificate chain verification failed: %w", err)
+		}
+
+		return nil
 	}
 
 	conn, err := quic.DialAddr(ctx, remoteAddr, tlsConfig, a.transportConfig)
 	if err != nil {
+		return nil, err
+	}
+
+	cs := conn.ConnectionState()
+	leaf := cs.TLS.PeerCertificates[0]
+	if err := a.VerifyTLSIdentity(leaf, peer.Identity); err != nil {
 		return nil, err
 	}
 
@@ -106,9 +157,12 @@ func (a *ClusterAgent) dialWithHandshake(remoteAddr, targetServerName string, co
 		return nil, err
 	}
 
-	if resp.Status != "ok" {
+	if resp.NodeID == "" {
 		return nil, fmt.Errorf("handshake failed: %s", resp.Message)
 	}
+	// if resp.Status != "ok" {
+	// 	return nil, fmt.Errorf("handshake failed: %s", resp.Message)
+	// }
 
 	return conn, nil
 }

@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,22 +17,15 @@ package test
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
-	"sync"
+	"os/exec"
 	"testing"
-	"text/template"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/network"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"go.uber.org/zap"
 )
 
@@ -50,103 +43,146 @@ type NodeProbeResult struct {
 	Cluster  ClusterInfoResponse
 }
 
-type Option func(*options)
-
-type options struct {
-	image      string
-	nodeCount  int
-	configData []byte
-	authData   []byte
-	network    *testcontainers.DockerNetwork
-	certsDir   string
-	domain     string
-}
-
-func defaultOptions() *options {
-	return &options{
-		image:     "mehdyjavany/cue:latest",
-		nodeCount: 3,
-	}
-}
-
-func WithImage(image string) Option { return func(o *options) { o.image = image } }
-func WithNodeCount(n int) Option    { return func(o *options) { o.nodeCount = n } }
-func WithConfigYAML(data []byte) Option {
-	return func(o *options) { o.configData = data }
-}
-func WithAuthYAML(data []byte) Option {
-	return func(o *options) { o.authData = data }
-}
-func WithNetwork(net *testcontainers.DockerNetwork) Option {
-	return func(o *options) { o.network = net }
-}
-func WithCertsDir(dir string) Option {
-	return func(o *options) { o.certsDir = dir }
-}
-
-//go:embed configs/cluster/config.yml
-var defaultConfigTpl []byte
-
-//go:embed configs/cluster/auth.yml
-var defaultAuthYAML []byte
-
-type Cluster struct {
-	Network *testcontainers.DockerNetwork
-	Nodes   []*TestNode
+type TestCluster struct {
+	Nodes   []TestNode
 	CACert  []byte
 	TempDir string
 }
 
 type TestNode struct {
-	Name        string
-	Container   testcontainers.Container
-	Hostname    string
-	APIPort     string
-	ProxyPort   string
-	ClusterPort string
+	Name      string
+	APIPort   string // host port
+	ProxyPort string // host port (same as API in your compose)
 }
 
-func SetupTestCluster(t *testing.T, ctx context.Context, caCertDir, domain string) (*Cluster, map[string]string, *zap.Logger) {
+func SetupTestCluster(t *testing.T, ctx context.Context, caCertDir, domain string) (*TestCluster, map[string]string, *zap.Logger) {
+	t.Helper()
+
 	_, err := CreateCA(caCertDir, "ca", 1, "")
 	require.NoError(t, err)
 
-	cluster, err := NewTestCluster(ctx, WithCertsDir(caCertDir))
+	testCluster, err := NewTestCluster(ctx, caCertDir, domain)
 	require.NoError(t, err)
 
-	WaitForClusterReady(t, cluster, 30*time.Second)
+	// Automatic cleanup
+	t.Cleanup(func() {
+		_ = testCluster.Terminate(ctx)
+	})
 
-	portMap := cluster.GetProxyMappedPorts()
-	addrsWithPortedMap := make(map[string]string, 0)
+	WaitForClusterReady(t, testCluster, 45*time.Second)
+
+	portMap := testCluster.GetProxyMappedPorts()
+	addrs := make(map[string]string, len(portMap))
 	for name, port := range portMap {
-		addrsWithPortedMap[name] = fmt.Sprintf("%s:%s", domain, port)
+		addrs[name] = fmt.Sprintf("%s:%s", domain, port)
 	}
-	logger, _ := zap.NewDevelopment()
 
-	return cluster, addrsWithPortedMap, logger
+	logger, _ := zap.NewDevelopment()
+	return testCluster, addrs, logger
 }
 
-func SetupFullTestSystem(t *testing.T, ctx context.Context, caCertDir, domain string) (*zap.Logger, *Cluster, *Client, map[string]string) {
-	cluster, addrsWithPortedMap, logger := SetupTestCluster(t, ctx, caCertDir, domain)
+// SetupFullTestSystem sets up both the cluster (via Docker Compose) and the proxy.
+func SetupFullTestSystem(t *testing.T, ctx context.Context, caCertDir, domain string) (*zap.Logger, *TestCluster, *Client, map[string]string) {
+	t.Helper()
 
-	// Start proxy connected to cluster
-	_, proxyURL, wsURL, stopProxy := StartProxy(t, ctx, logger, 1, cluster, caCertDir, domain)
-	defer stopProxy()
+	testCluster, addrsWithPortedMap, logger := SetupTestCluster(t, ctx, caCertDir, domain)
+
+	// Start proxy connected to the cluster
+	_, proxyURL, wsURL, stopProxy := StartProxy(t, ctx, logger, 1, testCluster, caCertDir, domain)
+	t.Cleanup(stopProxy)
 
 	client := NewClient(proxyURL, wsURL, logger)
-	defer client.Stop()
+	t.Cleanup(client.Stop)
 
-	// Wait for proxy to be ready instead
+	// Wait for proxy readiness
 	WaitForProxyReady(t, proxyURL, 10*time.Second)
 
 	logger.Info("Waiting for heartbeats to propagate...")
 	time.Sleep(3 * time.Second)
 
-	return logger, cluster, client, addrsWithPortedMap
-
+	return logger, testCluster, client, addrsWithPortedMap
 }
 
-// Add this to setup.go
-func WaitForClusterReady(t *testing.T, cluster *Cluster, timeout time.Duration) {
+func NewTestCluster(ctx context.Context, caCertDir, domain string) (*TestCluster, error) {
+	tmpDir, err := os.MkdirTemp("", "cue-test-*")
+	if err != nil {
+		return nil, err
+	}
+
+	// Load CA
+	caInfo, err := LoadCA(caCertDir, "ca")
+	if err != nil {
+		return nil, fmt.Errorf("load CA: %w", err)
+	}
+	caCert, _ := os.ReadFile(caInfo.CertPath)
+
+	// Generate certificates into the compose-mounted certs directory
+	for _, name := range []string{"node1", "node2", "node3"} {
+		_, _, err = CreateNodeCert(caCertDir, caInfo, NodeCert{
+			NodeIdentity: name,
+			ServerNames:  []string{name, name + "." + domain},
+		}, 1)
+		if err != nil {
+			return nil, fmt.Errorf("create cert for %s: %w", name, err)
+		}
+	}
+
+	composeDir := getComposeDir()
+	if err := runCompose(composeDir, "up", "-d"); err != nil {
+		return nil, fmt.Errorf("docker compose up failed: %w", err)
+	}
+
+	cluster := &TestCluster{
+		Nodes: []TestNode{
+			{Name: "node1", APIPort: "9321", ProxyPort: "9322"},
+			{Name: "node2", APIPort: "9421", ProxyPort: "9422"},
+			{Name: "node3", APIPort: "9521", ProxyPort: "9522"},
+		},
+		CACert:  caCert,
+		TempDir: tmpDir,
+	}
+
+	return cluster, nil
+}
+
+func getComposeDir() string {
+	return "."
+}
+
+func runCompose(dir string, args ...string) error {
+	cmd := exec.Command("docker", append([]string{"compose"}, args...)...)
+	cmd.Dir = dir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	if err != nil {
+		fmt.Println(out.String())
+		return err
+	}
+	return nil
+}
+
+func (c *TestCluster) GetProxyMappedPorts() map[string]string {
+	m := make(map[string]string, len(c.Nodes))
+	for _, n := range c.Nodes {
+		m[n.Name] = n.ProxyPort
+	}
+	return m
+}
+
+func (c *TestCluster) Terminate(ctx context.Context) error {
+	if dir := getComposeDir(); dir != "" {
+		_ = runCompose(dir, "down", "--volumes")
+	}
+	if c.TempDir != "" {
+		_ = os.RemoveAll(c.TempDir)
+	}
+	return nil
+}
+
+// WaitForClusterReady and ProbeNode remain unchanged (or use the previous version)
+func WaitForClusterReady(t *testing.T, testCluster *TestCluster, timeout time.Duration) {
 	t.Logf("Waiting for cluster to be ready (timeout: %v)", timeout)
 
 	deadline := time.Now().Add(timeout)
@@ -160,7 +196,7 @@ func WaitForClusterReady(t *testing.T, cluster *Cluster, timeout time.Duration) 
 		allReady := true
 		var leaderID string
 
-		for _, node := range cluster.Nodes {
+		for _, node := range testCluster.Nodes {
 			addr := fmt.Sprintf("127.0.0.1:%s", node.APIPort)
 			result, err := ProbeNode(context.Background(), addr)
 			if err != nil || !result.HealthOK {
@@ -183,323 +219,6 @@ func WaitForClusterReady(t *testing.T, cluster *Cluster, timeout time.Duration) 
 	}
 
 	t.Fatalf("❌ Cluster not ready after %v", timeout)
-}
-
-func WaitForProxyReady(t *testing.T, proxyURL string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-
-	for time.Now().Before(deadline) {
-		<-ticker.C // Simple channel receive, no select needed
-
-		resp, err := http.Get(proxyURL + "/health")
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			t.Log("✅ Proxy ready!")
-			return
-		}
-		if resp != nil {
-			resp.Body.Close()
-		}
-	}
-	t.Fatalf("❌ Proxy not ready after %v", timeout)
-}
-
-func NewTestCluster(ctx context.Context, opts ...Option) (*Cluster, error) {
-	o := defaultOptions()
-	for _, opt := range opts {
-		opt(o)
-	}
-
-	if o.certsDir == "" {
-		return nil, fmt.Errorf("certsDir is required: use WithCertsDir()")
-	}
-
-	if o.domain == "" {
-		o.domain = "localhost"
-	}
-	// Debug embed
-	if len(defaultConfigTpl) == 0 {
-		return nil, fmt.Errorf("defaultConfigTpl is empty. Make sure configs/cluster/config.yml exists")
-	}
-
-	tmpDir, err := os.MkdirTemp("", "cue-testcluster-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			_ = os.RemoveAll(tmpDir)
-		}
-	}()
-
-	// Load CA (shared with proxy)
-	caInfo, err := LoadCA(o.certsDir, "ca")
-	if err != nil {
-		return nil, fmt.Errorf("load CA from %s: %w", o.certsDir, err)
-	}
-
-	// copy ca to tempdir
-	caCertBytes, err := os.ReadFile(caInfo.CertPath)
-	if err != nil {
-		return nil, err
-	}
-	err = os.WriteFile(
-		filepath.Join(tmpDir, "ca_cert.pem"),
-		caCertBytes,
-		0644,
-	)
-	if err != nil {
-		return nil, err
-	}
-	caKeyBytes, err := os.ReadFile(caInfo.KeyPath)
-	if err != nil {
-		return nil, err
-	}
-	err = os.WriteFile(
-		filepath.Join(tmpDir, "ca_key.pem"),
-		caKeyBytes,
-		0644,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	nodeNames := make([]string, o.nodeCount)
-	for i := range nodeNames {
-		nodeNames[i] = fmt.Sprintf("node%d", i+1)
-	}
-
-	// Config template
-	var configTpl *template.Template
-	if len(o.configData) == 0 {
-		configTpl, err = template.New("config").Parse(string(defaultConfigTpl))
-	} else {
-		configTpl, err = template.New("config").Parse(string(o.configData))
-	}
-	if err != nil {
-		return nil, fmt.Errorf("parse config template: %w", err)
-	}
-
-	authData := o.authData
-	if len(authData) == 0 {
-		authData = defaultAuthYAML
-	}
-
-	// Network
-	var net *testcontainers.DockerNetwork
-	if o.network != nil {
-		net = o.network
-	} else {
-		net, err = network.New(ctx, network.WithAttachable())
-		if err != nil {
-			return nil, fmt.Errorf("create network: %w", err)
-		}
-	}
-
-	// Create node certs
-	for _, name := range nodeNames {
-		_, _, err = CreateNodeCert(tmpDir, caInfo, NodeCert{
-			NodeIdentity: name,
-			ServerNames:  []string{name + "." + o.domain},
-		}, 1)
-		if err != nil {
-			return nil, fmt.Errorf("create cert %s: %w", name, err)
-		}
-	}
-
-	caCertPEM, err := os.ReadFile(caInfo.CertPath)
-	if err != nil {
-		return nil, fmt.Errorf("read CA cert: %w", err)
-	}
-
-	// Start nodes in parallel
-	var (
-		wg      sync.WaitGroup
-		nodes   = make([]*TestNode, 0, len(nodeNames))
-		mu      sync.Mutex
-		errOnce error
-	)
-
-	for _, name := range nodeNames {
-		wg.Add(1)
-		go func(name string) {
-			defer wg.Done()
-			node, startErr := startNode(ctx, name, nodeNames, tmpDir, o.image, configTpl, authData, net)
-			if startErr != nil {
-				errOnce = fmt.Errorf("node %s: %w", name, startErr)
-				return
-			}
-			mu.Lock()
-			nodes = append(nodes, node)
-			mu.Unlock()
-		}(name)
-	}
-
-	wg.Wait()
-	if errOnce != nil {
-		return nil, errOnce
-	}
-
-	return &Cluster{
-		Network: net,
-		Nodes:   nodes,
-		CACert:  caCertPEM,
-		TempDir: tmpDir,
-	}, nil
-}
-
-func startNode(
-	ctx context.Context,
-	name string,
-	allNodes []string,
-	certsDir string,
-	image string,
-	configTpl *template.Template,
-	authData []byte,
-	net *testcontainers.DockerNetwork,
-) (*TestNode, error) {
-	voters := `["` + strings.Join(allNodes, `","`) + `"]`
-	authPath := "/etc/cue/auth.yml"
-
-	var configBuf bytes.Buffer
-	if err := configTpl.Execute(&configBuf, struct {
-		NodeName      string
-		InitialVoters string
-		Peers         string
-		AuthPath      string
-	}{
-		NodeName:      name,
-		InitialVoters: voters,
-		Peers:         voters,
-		AuthPath:      authPath,
-	}); err != nil {
-		return nil, err
-	}
-
-	// Copy files (configs + certs)
-	files := []testcontainers.ContainerFile{
-		{Reader: bytes.NewReader(configBuf.Bytes()), ContainerFilePath: "/etc/cue/config.yml", FileMode: 0644},
-		{Reader: bytes.NewReader(authData), ContainerFilePath: authPath, FileMode: 0644},
-	}
-
-	certEntries, _ := os.ReadDir(certsDir)
-	for _, f := range certEntries {
-		if f.IsDir() {
-			continue
-		}
-		data, _ := os.ReadFile(filepath.Join(certsDir, f.Name()))
-		files = append(files, testcontainers.ContainerFile{
-			Reader:            bytes.NewReader(data),
-			ContainerFilePath: "/etc/cue/certs/" + f.Name(),
-			FileMode:          0644,
-		})
-	}
-
-	req := testcontainers.ContainerRequest{
-		Image:           image,
-		AlwaysPullImage: true,
-		ExposedPorts: []string{
-			"8321/tcp",
-			"8322/udp",
-			"8323/udp",
-		},
-		Networks: []string{net.Name},
-		NetworkAliases: map[string][]string{
-			net.Name: {name},
-		},
-		Files: files,
-		// IMPORTANT: Do NOT include "/cue" here because of ENTRYPOINT
-		Cmd: []string{
-			"serve",
-			"--config", "/etc/cue/config.yml",
-			"--node-id", name,
-			"--data-dir", "/etc/cue/data",
-			"--cluster-cert", fmt.Sprintf("/etc/cue/certs/%s.pem", name),
-			"--cluster-key", fmt.Sprintf("/etc/cue/certs/%s_key.pem", name),
-			"--cluster-ca", "/etc/cue/certs/ca_cert.pem",
-			"--proxy-cert", fmt.Sprintf("/etc/cue/certs/%s.pem", name),
-			"--proxy-key", fmt.Sprintf("/etc/cue/certs/%s_key.pem", name),
-			"--proxy-ca", "/etc/cue/certs/ca_cert.pem",
-			"--initial-voters", strings.Join(allNodes, ","),
-			"--peers", strings.Join(allNodes, ","),
-			"--log-level", "debug",
-			"--log-output", "stdout",
-		},
-		WaitingFor: wait.ForHTTP("/health").
-			WithPort("8321/tcp").
-			WithStartupTimeout(45 * time.Second),
-		LogConsumerCfg: &testcontainers.LogConsumerConfig{
-			Consumers: []testcontainers.LogConsumer{&testcontainers.StdoutLogConsumer{}},
-		},
-	}
-
-	ctr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create container for %s: %w", name, err)
-	}
-
-	apiPort, err := ctr.MappedPort(ctx, "8321/tcp")
-	if err != nil {
-		return nil, err
-	}
-
-	proxyPort, err := ctr.MappedPort(ctx, "8322/udp")
-	if err != nil {
-		return nil, err
-	}
-
-	quicPort, err := ctr.MappedPort(ctx, "8323/udp")
-	if err != nil {
-		return nil, err
-	}
-
-	return &TestNode{
-		Name:        name,
-		Container:   ctr,
-		Hostname:    "127.0.0.1",
-		APIPort:     apiPort.Port(),
-		ClusterPort: quicPort.Port(),
-		ProxyPort:   proxyPort.Port(),
-	}, nil
-}
-
-func (c *Cluster) GetProxyMappedPorts() map[string]string {
-	portMap := make(map[string]string, 0)
-	for _, n := range c.Nodes {
-		portMap[n.Name] = n.ProxyPort
-	}
-	return portMap
-}
-
-func (c *Cluster) Terminate(ctx context.Context) error {
-	var errs []error
-
-	for _, n := range c.Nodes {
-		if n.Container != nil {
-			if err := n.Container.Terminate(ctx); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
-
-	if c.Network != nil {
-		if err := c.Network.Remove(ctx); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	_ = os.RemoveAll(c.TempDir)
-
-	if len(errs) > 0 {
-		return fmt.Errorf("terminate errors: %v", errs)
-	}
-
-	return nil
 }
 
 func ProbeNode(ctx context.Context, addr string) (*NodeProbeResult, error) {
@@ -560,4 +279,25 @@ func ProbeNode(ctx context.Context, addr string) (*NodeProbeResult, error) {
 	}
 
 	return result, nil
+}
+
+func WaitForProxyReady(t *testing.T, proxyURL string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for time.Now().Before(deadline) {
+		<-ticker.C // Simple channel receive, no select needed
+
+		resp, err := http.Get(proxyURL + "/health")
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			t.Log("✅ Proxy ready!")
+			return
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}
+	t.Fatalf("❌ Proxy not ready after %v", timeout)
 }

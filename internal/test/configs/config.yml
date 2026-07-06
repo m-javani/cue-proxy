@@ -37,12 +37,5 @@ cluster:
   cert_path: "certs/cluster-cert.pem"
   key_path: "certs/cluster-key.pem"
   ca_path: "certs/cluster-ca.pem"
-  address_resolver:
-    type: service  # service, dns, static
-    # config:
-    #   domain: ""
-    #   port: 8323
-  tls_verifier:
-    type: cn  # cn, dns, spiffe
-    # config:
-    #   domain: "localhost"
+  discovery_yml_path: "./discovery.yml"  # required for initial discovery
+  cluster_api_port: 8321

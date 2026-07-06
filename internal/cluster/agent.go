@@ -26,8 +26,6 @@ import (
 	"github.com/m-javani/cue-proxy/internal"
 	"github.com/m-javani/cue-proxy/internal/api"
 	"github.com/m-javani/cue-proxy/internal/model"
-	"github.com/m-javani/cue/pkg/discovery"
-	"github.com/m-javani/cue/pkg/verifier"
 	"github.com/quic-go/quic-go"
 	"go.uber.org/zap"
 )
@@ -60,6 +58,11 @@ type ClusterAgent struct {
 	cueTopology     CueTopology
 	topologyMu      sync.RWMutex
 
+	discovery      map[string]PeerInfo
+	clusterApiPort int
+	discoveryMu    sync.RWMutex
+	discovering    atomic.Bool
+
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -75,9 +78,6 @@ type ClusterAgent struct {
 	requestCounter atomic.Uint32
 
 	router api.Router
-
-	addressResolver discovery.AddressResolver
-	tlsVerifier     verifier.TLSVerifier
 
 	doneCmdBatchMu     sync.Mutex
 	doneCmdBatchBuffer map[string][]string // topic -> jobIDs
@@ -98,10 +98,11 @@ func NewClusterAgent(
 	producerCh <-chan model.ProxyRequestWithRespCh,
 	router api.Router,
 	cluster_seeds []string,
+	discovery map[string]PeerInfo,
 	logger *zap.Logger,
-	addressResolver discovery.AddressResolver,
-	tlsVerifier verifier.TLSVerifier,
-	leaderAvailable *atomic.Bool) (*ClusterAgent, error) {
+	leaderAvailable *atomic.Bool,
+	ClusterApiPort int,
+) (*ClusterAgent, error) {
 	tlsConfig, err := loadClientTLSConfig(certPath, keyPath, caCertPath)
 	if err != nil {
 		return nil, fmt.Errorf("load TLS config: %w", err)
@@ -132,8 +133,7 @@ func NewClusterAgent(
 			Voters:   cluster_seeds,
 			Learners: []string{},
 		},
-		addressResolver:    addressResolver,
-		tlsVerifier:        tlsVerifier,
+		discovery:          discovery,
 		logger:             logger,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -146,6 +146,8 @@ func NewClusterAgent(
 		doneCmdBatchMu:     sync.Mutex{},
 		doneCmdBatchBuffer: make(map[string][]string, 0),
 		reqIDCounter:       atomic.Uint64{},
+		clusterApiPort:     ClusterApiPort,
+		discoveryMu:        sync.RWMutex{},
 	}
 
 	agent.currentLeader.Store("")

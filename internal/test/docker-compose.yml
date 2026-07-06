@@ -1,0 +1,70 @@
+services:
+  node1:
+    image: mehdyjavany/cue:latest
+    container_name: node1
+    hostname: node1
+    networks:
+      cue-net:
+        ipv4_address: 172.21.0.10
+    ports:
+      - "9321:8321"
+      - "9322:8322/udp" # cluster proxy (gateway) for accepting connection from external proxy
+      - "9323:8323/udp" #for cluster node to node communication
+    volumes:
+      - ./certs:/certs:ro
+      - ./configs/cluster:/opt/cue/configs:ro
+    tmpfs:
+      - /opt/cue/data:rw,noexec,nosuid,size=100M
+    command: >
+      serve --config /opt/cue/configs/config.yml --api-token-path /opt/cue/configs/auth.yml --node-id node1 --data-dir /opt/cue/data --cluster-cert /certs/node1.pem --cluster-key /certs/node1_key.pem --cluster-ca /certs/ca_cert.pem --proxy-cert /certs/node1.pem --proxy-key /certs/node1_key.pem --proxy-ca /certs/ca_cert.pem --initial-voters node1,node2,node3 --discovery-yml /opt/cue/configs/discovery.yml --log-level info
+    cap_add:
+      - NET_ADMIN
+
+  node2:
+    image: mehdyjavany/cue:latest
+    container_name: node2
+    hostname: node2
+    networks:
+      cue-net:
+        ipv4_address: 172.21.0.11
+    ports:
+      - "9421:8321"
+      - "9422:8322/udp"
+      - "9423:8323/udp"
+    volumes:
+      - ./certs:/certs:ro
+      - ./configs/cluster:/opt/cue/configs:ro
+    tmpfs:
+      - /opt/cue/data:rw,noexec,nosuid,size=100M
+    command: >
+      serve --config /opt/cue/configs/config.yml --api-token-path /opt/cue/configs/auth.yml --node-id node2 --data-dir /opt/cue/data --cluster-cert /certs/node2.pem --cluster-key /certs/node2_key.pem --cluster-ca /certs/ca_cert.pem --proxy-cert /certs/node2.pem --proxy-key /certs/node2_key.pem --proxy-ca /certs/ca_cert.pem --initial-voters node1,node2,node3  --discovery-yml /opt/cue/configs/discovery.yml --log-level info
+    cap_add:
+      - NET_ADMIN
+
+  node3:
+    image: mehdyjavany/cue:latest
+    container_name: node3
+    hostname: node3
+    networks:
+      cue-net:
+        ipv4_address: 172.21.0.12
+    ports:
+      - "9521:8321"
+      - "9522:8322/udp"
+      - "9523:8323/udp"
+    volumes:
+      - ./certs:/certs:ro
+      - ./configs/cluster:/opt/cue/configs:ro
+    tmpfs:
+      - /opt/cue/data:rw,noexec,nosuid,size=100M
+    command: >
+      serve --config /opt/cue/configs/config.yml --api-token-path /opt/cue/configs/auth.yml --node-id node3 --data-dir /opt/cue/data --cluster-cert /certs/node3.pem --cluster-key /certs/node3_key.pem --cluster-ca /certs/ca_cert.pem --proxy-cert /certs/node3.pem --proxy-key /certs/node3_key.pem --proxy-ca /certs/ca_cert.pem --initial-voters node1,node2,node3  --discovery-yml /opt/cue/configs/discovery.yml --log-level info
+    cap_add:
+      - NET_ADMIN
+
+networks:
+  cue-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

@@ -26,8 +26,6 @@ import (
 	"github.com/m-javani/cue-proxy/internal/cluster"
 	"github.com/m-javani/cue-proxy/internal/config"
 	"github.com/m-javani/cue-proxy/internal/model"
-	"github.com/m-javani/cue/pkg/discovery"
-	"github.com/m-javani/cue/pkg/verifier"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +33,7 @@ const ProducerReqBufferSize int = 1000
 
 // RunProxy starts the proxy with the given configuration and logger.
 // It blocks until the context is cancelled or a fatal error occurs.
-func RunProxy(ctx context.Context, cfg *config.Config, logger *zap.Logger, addressResolver discovery.AddressResolver, tlsVerifier verifier.TLSVerifier, leaderAvailable *atomic.Bool) error {
+func RunProxy(ctx context.Context, cfg *config.Config, logger *zap.Logger, leaderAvailable *atomic.Bool, discovery map[string]cluster.PeerInfo) error {
 
 	// Create communication channels
 	producerCh := make(chan model.ProxyRequestWithRespCh, ProducerReqBufferSize)
@@ -75,10 +73,10 @@ func RunProxy(ctx context.Context, cfg *config.Config, logger *zap.Logger, addre
 		producerCh,
 		router,
 		cfg.Cluster.ClusterSeeds,
+		discovery,
 		logger,
-		addressResolver,
-		tlsVerifier,
 		leaderAvailable,
+		cfg.Cluster.ClusterApiPort,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create cluster agent: %w", err)

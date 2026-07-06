@@ -12,17 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-node_id: {{.NodeName}}
 data_dir: ./data
 
 cluster:
   listen_addr: "0.0.0.0"
   quic_port: 8323
-  cert_path: "./certs/{{.NodeName}}.pem"
-  key_path: "./certs/{{.NodeName}}_key.pem"
-  ca_path: "./certs/ca_cert.pem"
-  initial_voters: {{.InitialVoters}}
-  peers: {{.Peers}}
   snapshot_interval_sec: 120
   snapshot_trigger_count: 100000
   wal_flush_threshold: 50000
@@ -30,12 +24,14 @@ cluster:
   raft_tick_ms: 100
   raft_heartbeat_tick: 10
   raft_election_tick: 100
+  discovery_kind: "static"  # or "http"
+  discovery_yml_path: "./discovery.yml"  # required for static
+  discovery_http_host: "" # "http://discovery-service:8080"  required for http
+  
 
 proxy:
   addr: "0.0.0.0"
   port: 8322
-  cert_path: "./certs/{{.NodeName}}.pem"
-  key_path: "./certs/{{.NodeName}}_key.pem"
   ca_path: "./certs/ca_cert.pem"
 
 wal:
@@ -58,7 +54,6 @@ partition:
 api:
   listen_addr: "0.0.0.0"
   api_port: 8321
-  token_path: "{{.AuthPath}}"
   timeout_seconds: 30
 
 address_resolver:

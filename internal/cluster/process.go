@@ -91,7 +91,7 @@ func (a *ClusterAgent) evaluateLeadership(claimedLeader string, hb *model.ToProx
 	agreementCount := 0
 
 	for _, info := range a.cueTopology.NodeHeartbeats {
-		if now.Sub(info.LastSeen) > 2*time.Second {
+		if now.Sub(info.LastSeen) > 5*time.Second {
 			continue
 		}
 		activeNodes++
@@ -128,12 +128,35 @@ func (a *ClusterAgent) evaluateLeadership(claimedLeader string, hb *model.ToProx
 
 			a.cueTopology.Leader = claimedLeader
 			a.cueTopology.Term = hb.Term
+
+			// compare before mutate
+			updated := false
+			if len(a.cueTopology.Voters) != len(hb.Voters) {
+				updated = true
+			} else {
+				// Create a map for quick lookup
+				voterMap := make(map[string]bool, len(a.cueTopology.Voters))
+				for _, v := range a.cueTopology.Voters {
+					voterMap[v] = true
+				}
+				for _, v := range hb.Voters {
+					if !voterMap[v] {
+						updated = true
+						break
+					}
+				}
+			}
+
 			a.cueTopology.Voters = hb.Voters
 			a.cueTopology.Learners = hb.Learners
 			a.cueTopology.LastUpdate = now
 
 			a.currentLeader.Store(claimedLeader)
 			a.leaderAvailable.Store(true)
+
+			if updated {
+				go a.updateDiscovery()
+			}
 		}
 	} else {
 		// Only log if current leader lost quorum (important event)

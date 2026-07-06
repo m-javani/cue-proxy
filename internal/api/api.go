@@ -122,7 +122,7 @@ func (p *ProxyApi) Start() error {
 		)
 		err = p.httpServer.ListenAndServeTLS(p.cfg.CertPath, p.cfg.KeyPath)
 	} else {
-		p.logger.Warn("TLS is disabled - API will serve over HTTP (not recommended for production)")
+		p.logger.Info("TLS is disabled - API will serve over HTTP")
 		err = p.httpServer.ListenAndServe()
 	}
 

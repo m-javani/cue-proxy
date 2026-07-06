@@ -1,50 +1,94 @@
-// Copyright 2026 M. Javani
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cluster
 
 import (
-	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"time"
+
+	"go.uber.org/zap"
 )
 
-// ListPeersAddrServerName resolves and returns the list of peers and their IP:port strings
-func (a *ClusterAgent) ListPeersAddrServerName() []PeerResolvedInfo {
-	a.topologyMu.RLock()
-	voters := make([]string, len(a.cueTopology.Voters))
-	copy(voters, a.cueTopology.Voters)
-	a.topologyMu.RUnlock()
+func (a *ClusterAgent) updateDiscovery() {
+	if !a.discovering.CompareAndSwap(false, true) {
+		return
+	}
+	defer a.discovering.Store(false)
 
-	resolved := make([]PeerResolvedInfo, 0, len(voters))
-
-	for _, peer := range voters {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		addr, err := a.addressResolver.Resolve(ctx, peer)
-		cancel()
-		if err != nil {
-			continue
+	// Try leader first if available
+	if a.leaderAvailable.Load() {
+		if val := a.currentLeader.Load(); val != nil {
+			if leaderID, ok := val.(string); ok {
+				a.discoveryMu.RLock()
+				peer, exist := a.discovery[leaderID]
+				a.discoveryMu.RUnlock()
+				if exist {
+					if err := a.fetchDiscovery([]string{peer.IP}); err == nil {
+						a.logger.Info("discovery updated from leader", zap.String("leader", leaderID))
+						return
+					}
+				}
+			}
 		}
-		resolved = append(resolved, PeerResolvedInfo{
-			NodeID:     peer,
-			Addr:       addr,
-			ServerName: peer,
-		})
 	}
 
-	if len(resolved) == 0 {
-		a.logger.Sugar().Warnf("%s: the resolved peers list is 0/%d", a.proxyID, len(voters))
+	// Try all available nodes in discovery
+	a.discoveryMu.RLock()
+	targets := make([]string, 0, len(a.discovery))
+	for _, peer := range a.discovery {
+		targets = append(targets, peer.IP)
+	}
+	a.discoveryMu.RUnlock()
+
+	if len(targets) == 0 {
+		a.logger.Warn("no discovery targets available to fetch cluster peers")
+		return
 	}
 
-	return resolved
+	if err := a.fetchDiscovery(targets); err != nil {
+		a.logger.Sugar().Warnf("failed to upadte discovery. %s", err.Error())
+	}
+}
+
+func (a *ClusterAgent) fetchDiscovery(ips []string) error {
+	for _, ip := range ips {
+		peers, err := a.getPeersFromClusterAPI(ip, a.clusterApiPort)
+		if err == nil && len(peers) > 0 {
+			a.discoveryMu.Lock()
+			a.discovery = peers
+			a.discoveryMu.Unlock()
+			a.logger.Info("discovery updated from cluster", zap.String("node", ip), zap.Int("peers", len(peers)))
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to update discovery from all targets")
+}
+
+func (a *ClusterAgent) getPeersFromClusterAPI(ip string, port int) (map[string]PeerInfo, error) {
+	url := fmt.Sprintf("http://%s:%d/discovery/peers", ip, port)
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("http request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status: %s", resp.Status)
+	}
+
+	var peers map[string]PeerInfo
+	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(peers) == 0 {
+		return nil, fmt.Errorf("received empty peer list")
+	}
+
+	return peers, nil
 }
