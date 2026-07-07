@@ -43,21 +43,12 @@ cluster:
   quic_addr: "127.0.0.1"
   quic_port: 9443
   cluster_seeds:
-    - "seed1:8443"
-    - "seed2:8443"
+    - "seed1:8323"
+    - "seed2:8323"
   cert_path: "custom/cluster-cert.pem"
   key_path: "custom/cluster-key.pem"
   ca_path: "custom/cluster-ca.pem"
-  address_resolver:
-    type: "dns"
-    config:
-      domain: "example.com"
-      port: 8443
-  tls_verifier:
-    type: "spiffe"
-    config:
-      trust_domain: "example.com"
-      namespace: "default"
+  discovery_yml_path: "./discovery.yml"
 `
 
 		tmpfile, err := os.CreateTemp("", "config-*.yaml")
@@ -119,19 +110,6 @@ cluster:
 			t.Errorf("expected Cluster CAPath 'custom/cluster-ca.pem', got '%s'", cfg.Cluster.CAPath)
 		}
 
-		// Verify Resolver and Verifier
-		if cfg.Cluster.AddressResolver.Type != "dns" {
-			t.Errorf("expected resolver type 'dns', got '%s'", cfg.Cluster.AddressResolver.Type)
-		}
-		if cfg.Cluster.AddressResolver.Config["domain"] != "example.com" {
-			t.Errorf("expected resolver domain 'example.com', got '%v'", cfg.Cluster.AddressResolver.Config["domain"])
-		}
-		if cfg.Cluster.TLSVerifier.Type != "spiffe" {
-			t.Errorf("expected verifier type 'spiffe', got '%s'", cfg.Cluster.TLSVerifier.Type)
-		}
-		if cfg.Cluster.TLSVerifier.Config["trust_domain"] != "example.com" {
-			t.Errorf("expected verifier trust_domain 'example.com', got '%v'", cfg.Cluster.TLSVerifier.Config["trust_domain"])
-		}
 	})
 
 	t.Run("config_file_not_found_uses_defaults", func(t *testing.T) {
@@ -150,17 +128,11 @@ cluster:
 		if cfg.API.TLSEnabled != false {
 			t.Error("expected API TLS to be disabled by default")
 		}
-		if cfg.Cluster.QUICPort != 8443 {
-			t.Errorf("expected default QUICPort 8443, got %d", cfg.Cluster.QUICPort)
+		if cfg.Cluster.QUICPort != 8323 {
+			t.Errorf("expected default QUICPort 8323, got %d", cfg.Cluster.QUICPort)
 		}
 		if cfg.Cluster.CertPath != "certs/cluster-cert.pem" {
 			t.Errorf("expected default cluster cert path 'certs/cluster-cert.pem', got '%s'", cfg.Cluster.CertPath)
-		}
-		if cfg.Cluster.AddressResolver.Type != "service" {
-			t.Errorf("expected default resolver type 'service', got '%s'", cfg.Cluster.AddressResolver.Type)
-		}
-		if cfg.Cluster.TLSVerifier.Type != "cn" {
-			t.Errorf("expected default verifier type 'cn', got '%s'", cfg.Cluster.TLSVerifier.Type)
 		}
 	})
 
@@ -198,15 +170,10 @@ func TestValidate(t *testing.T) {
 				KeyPath:             "", // Missing key when enabled
 			},
 			Cluster: ClusterConfig{
-				QUICPort: 0,
-				CertPath: "", // Missing cert
-				KeyPath:  "", // Missing key
-				AddressResolver: ResolverConfig{
-					Type: "invalid",
-				},
-				TLSVerifier: VerifierConfig{
-					Type: "invalid",
-				},
+				QUICPort:         0,
+				CertPath:         "", // Missing cert
+				KeyPath:          "", // Missing key
+				DiscoveryYMLPath: "",
 			},
 		}
 
@@ -224,8 +191,7 @@ func TestValidate(t *testing.T) {
 			"api.key_path is required when tls_enabled is true",
 			"cluster.cert_path is required",
 			"cluster.key_path is required",
-			`unknown address_resolver type: "invalid"`,
-			`unknown tls_verifier type: "invalid"`,
+			"cluster.discovery_yml_path is required",
 		}
 
 		for _, expected := range expectedErrors {
@@ -273,23 +239,11 @@ func TestValidate(t *testing.T) {
 			{"cluster_missing_key", func(c *Config) {
 				c.Cluster.KeyPath = ""
 			}},
-			{"empty_resolver_type", func(c *Config) { c.Cluster.AddressResolver.Type = "" }},
-			{"empty_verifier_type", func(c *Config) { c.Cluster.TLSVerifier.Type = "" }},
-			{"dns_resolver_missing_domain", func(c *Config) {
-				c.Cluster.AddressResolver.Type = "dns"
-				c.Cluster.AddressResolver.Config = map[string]any{}
+			{"cluster_missing_discovery", func(c *Config) {
+				c.Cluster.DiscoveryYMLPath = ""
 			}},
-			{"static_resolver_missing_peers", func(c *Config) {
-				c.Cluster.AddressResolver.Type = "static"
-				c.Cluster.AddressResolver.Config = map[string]any{}
-			}},
-			{"dns_verifier_missing_domain", func(c *Config) {
-				c.Cluster.TLSVerifier.Type = "dns"
-				c.Cluster.TLSVerifier.Config = map[string]any{}
-			}},
-			{"spiffe_verifier_missing_trust_domain", func(c *Config) {
-				c.Cluster.TLSVerifier.Type = "spiffe"
-				c.Cluster.TLSVerifier.Config = map[string]any{}
+			{"cluster_missing_discovery", func(c *Config) {
+				c.Cluster.DiscoveryYMLPath = ""
 			}},
 		}
 
@@ -304,66 +258,6 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("valid_resolver_and_verifier_configs", func(t *testing.T) {
-		testCases := []struct {
-			name     string
-			resolver ResolverConfig
-			verifier VerifierConfig
-		}{
-			{
-				name: "service_resolver_with_cn_verifier",
-				resolver: ResolverConfig{
-					Type:   "service",
-					Config: map[string]any{"port": 8443},
-				},
-				verifier: VerifierConfig{
-					Type:   "cn",
-					Config: map[string]any{},
-				},
-			},
-			{
-				name: "dns_resolver_with_dns_verifier",
-				resolver: ResolverConfig{
-					Type:   "dns",
-					Config: map[string]any{"domain": "example.com", "port": 8443},
-				},
-				verifier: VerifierConfig{
-					Type:   "dns",
-					Config: map[string]any{"domain": "example.com"},
-				},
-			},
-			{
-				name: "static_resolver_with_spiffe_verifier",
-				resolver: ResolverConfig{
-					Type: "static",
-					Config: map[string]any{
-						"peers": map[string]any{
-							"node1": "192.168.1.1:8443",
-							"node2": "192.168.1.2:8443",
-						},
-					},
-				},
-				verifier: VerifierConfig{
-					Type: "spiffe",
-					Config: map[string]any{
-						"trust_domain": "example.com",
-						"namespace":    "default",
-					},
-				},
-			},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				c := DefaultConfig()
-				c.Cluster.AddressResolver = tc.resolver
-				c.Cluster.TLSVerifier = tc.verifier
-				if err := c.Validate(); err != nil {
-					t.Errorf("expected no error, got %v", err)
-				}
-			})
-		}
-	})
 }
 
 func TestGetAddressFunctions(t *testing.T) {
@@ -403,18 +297,16 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.API.CertPath != "certs/api-cert.pem" {
 		t.Errorf("expected API CertPath 'certs/api-cert.pem', got '%s'", cfg.API.CertPath)
 	}
-	if cfg.Cluster.QUICPort != 8443 {
-		t.Errorf("expected QUICPort 8443, got %d", cfg.Cluster.QUICPort)
+	if cfg.Cluster.QUICPort != 8323 {
+		t.Errorf("expected QUICPort 8323, got %d", cfg.Cluster.QUICPort)
 	}
 	if cfg.Cluster.CertPath != "certs/cluster-cert.pem" {
 		t.Errorf("expected cluster cert path 'certs/cluster-cert.pem', got '%s'", cfg.Cluster.CertPath)
 	}
-	if cfg.Cluster.AddressResolver.Type != "service" {
-		t.Errorf("expected resolver type 'service', got '%s'", cfg.Cluster.AddressResolver.Type)
+	if cfg.Cluster.DiscoveryYMLPath != "./discovery.yml" {
+		t.Errorf("expected discovery path './discovery.yml', got '%s'", cfg.Cluster.DiscoveryYMLPath)
 	}
-	if cfg.Cluster.TLSVerifier.Type != "cn" {
-		t.Errorf("expected verifier type 'cn', got '%s'", cfg.Cluster.TLSVerifier.Type)
-	}
+
 	if cfg.API.AuthPath != "./auth.yml" {
 		t.Errorf("expected AuthPath './auth.yml', got '%s'", cfg.API.AuthPath)
 	}

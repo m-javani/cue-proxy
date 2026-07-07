@@ -1,0 +1,21 @@
+nodes:
+  - node_id: node1
+    ip: 127.0.0.1
+    port: 9322
+    identity:
+      kind: dns
+      value: node1
+
+  - node_id: node2
+    ip: 127.0.0.1
+    port: 9422
+    identity:
+      kind: dns
+      value: node2
+
+  - node_id: node3
+    ip: 127.0.0.1
+    port: 9522
+    identity:
+      kind: dns
+      value: node3

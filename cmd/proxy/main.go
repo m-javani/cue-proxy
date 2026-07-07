@@ -25,9 +25,8 @@ import (
 	"syscall"
 
 	"github.com/m-javani/cue-proxy/internal/app"
+	"github.com/m-javani/cue-proxy/internal/cluster"
 	"github.com/m-javani/cue-proxy/internal/config"
-	"github.com/m-javani/cue/pkg/discovery"
-	"github.com/m-javani/cue/pkg/verifier"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +47,9 @@ func main() {
 	clusterKeyPath := flag.String("cluster-key", "", "Cluster TLS key path (overrides config)")
 	clusterCaPath := flag.String("cluster-ca", "", "Cluster CA certificate path (overrides config)")
 	clusterSeeds := flag.String("seed", "", "Comma-separated cluster seed nodes (e.g., node1,node2,node3)")
+	clusterApiPort := flag.Int("cluster-api-port", 0, "Cluster api port (overrides config)")
 	proxyID := flag.String("proxy-id", "", "Proxy ID (REQUIRED, must match certificate identity)")
+	discoveryYMLPath := flag.String("discovery-yml", "./discovery.yml", "Path to discovery.yml file containing initial cluster peer info")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Proxy Server v%s\n\n", version)
@@ -78,7 +79,7 @@ func main() {
 		*quicAddr, *quicPort,
 		*apiCertPath, *apiKeyPath,
 		*clusterCertPath, *clusterKeyPath, *clusterCaPath,
-		*clusterSeeds, *proxyID, *logLevel,
+		*clusterSeeds, *proxyID, *logLevel, *discoveryYMLPath, *clusterApiPort,
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to build config: %v\n", err)
@@ -92,21 +93,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	clVerif, err := NewTLSVerifier(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to build tls verifier: %v\n", err)
-		os.Exit(1)
-	}
-	addrResolver, err := NewAddressResolver(*cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to build address resolver: %v\n", err)
-		os.Exit(1)
-	}
-
 	leaderAvailable := atomic.Bool{}
 	leaderAvailable.Store(false)
 
-	if err := app.RunProxy(ctx, cfg, logger, addrResolver, clVerif, &leaderAvailable); err != nil {
+	discovery, err := cluster.LoadDiscoveryFile(cfg.Cluster.DiscoveryYMLPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load initial discovery file: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := app.RunProxy(ctx, cfg, logger, &leaderAvailable, discovery); err != nil {
 		logger.Fatal("proxy runtime error", zap.Error(err))
 	}
 }
@@ -119,6 +115,7 @@ func buildConfig(
 	apiCertPath, apiKeyPath,
 	clusterCertPath, clusterKeyPath, clusterCaPath string,
 	clusterSeeds string, proxyID string, logLevel string,
+	discoveryYMLPath string, clusterApiPort int,
 ) (*config.Config, *zap.Logger, error) {
 	// Setup logger
 	var logger *zap.Logger
@@ -143,6 +140,8 @@ func buildConfig(
 	}
 
 	cfg.ProxyID = proxyID
+	cfg.Cluster.DiscoveryYMLPath = discoveryYMLPath
+	cfg.Cluster.ClusterApiPort = clusterApiPort
 
 	if apiHost != "" {
 		cfg.API.Host = apiHost
@@ -191,81 +190,4 @@ func buildConfig(
 	)
 
 	return cfg, logger, nil
-}
-
-func NewAddressResolver(cfg config.Config) (discovery.AddressResolver, error) {
-	var resolver discovery.AddressResolver
-
-	switch cfg.Cluster.AddressResolver.Type {
-	case "service":
-		port, ok := cfg.Cluster.AddressResolver.Config["port"].(int)
-		if !ok {
-			port = int(cfg.Cluster.QUICPort) // fallback to cluster port
-		}
-		resolver = discovery.NewServiceResolver(port)
-
-	case "dns":
-		domain, ok := cfg.Cluster.AddressResolver.Config["domain"].(string)
-		if !ok {
-			return nil, fmt.Errorf("dns resolver requires 'domain' config field")
-		}
-		port, ok := cfg.Cluster.AddressResolver.Config["port"].(int)
-		if !ok {
-			port = int(cfg.Cluster.QUICPort) // fallback to cluster port
-		}
-		resolver = discovery.NewDNSResolver(port, domain)
-
-	case "static":
-		peersRaw, ok := cfg.Cluster.AddressResolver.Config["peers"].(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("static resolver requires 'peers' config map")
-		}
-		peers := make(map[string]string)
-		for k, v := range peersRaw {
-			peers[k] = v.(string)
-		}
-		resolver = discovery.StaticResolver{
-			Addresses: peers,
-		}
-
-	default:
-		return nil, fmt.Errorf("unknown address resolver type: %q", cfg.Cluster.AddressResolver.Type)
-	}
-
-	return resolver, nil
-}
-
-func NewTLSVerifier(cfg *config.Config) (verifier.TLSVerifier, error) {
-	var tlsVerifier verifier.TLSVerifier
-
-	switch cfg.Cluster.TLSVerifier.Type {
-	case "dns":
-		domain, ok := cfg.Cluster.TLSVerifier.Config["domain"].(string)
-		if !ok {
-			return nil, fmt.Errorf("dns verifier requires 'domain' config field")
-		}
-		tlsVerifier = verifier.DNSVerifier{
-			Domain: domain,
-		}
-
-	case "cn":
-		// No config needed
-		tlsVerifier = verifier.CNVerifier{}
-
-	case "spiffe":
-		trustDomain, ok := cfg.Cluster.TLSVerifier.Config["trust_domain"].(string)
-		if !ok {
-			return nil, fmt.Errorf("spiffe verifier requires 'trust_domain' config field")
-		}
-		namespace, _ := cfg.Cluster.TLSVerifier.Config["namespace"].(string) // optional
-		tlsVerifier = verifier.SPIFFEVerifier{
-			TrustDomain: trustDomain,
-			Namespace:   namespace,
-		}
-
-	default:
-		return nil, fmt.Errorf("unknown TLS verifier type: %q", cfg.Cluster.TLSVerifier.Type)
-	}
-
-	return tlsVerifier, nil
 }

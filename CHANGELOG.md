@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0] - 2026-07-07
+### Changed
+- **BREAKING**: Discard resolver and verifier components
+- Simplified QUIC verifier implementation
+- Update discovery mechanism to use cluster-based updates
+- Replace test containers with Docker Compose
+
+### Fixed
+- Streamline verification process by removing redundant resolver/verifier layers
+- Improve discovery reliability with cluster-aware updates
+
 ## [0.2.0] - 2026-07-01
 ### Changed
 - Bump github.com/m-javani/cue dependency from v0.1.0 to v0.2.0

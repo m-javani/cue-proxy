@@ -69,18 +69,8 @@ type ClusterConfig struct {
 	KeyPath  string `mapstructure:"key_path"`
 	CAPath   string `mapstructure:"ca_path"`
 
-	AddressResolver ResolverConfig `mapstructure:"address_resolver"`
-	TLSVerifier     VerifierConfig `mapstructure:"tls_verifier"`
-}
-
-type ResolverConfig struct {
-	Type   string         `mapstructure:"type"` // "service", "dns", "static"
-	Config map[string]any `mapstructure:"config"`
-}
-
-type VerifierConfig struct {
-	Type   string         `mapstructure:"type"` // "dns", "cn", "spiffe"
-	Config map[string]any `mapstructure:"config"`
+	DiscoveryYMLPath string `mapstructure:"discovery_yml_path"`
+	ClusterApiPort   int    `mapstructure:"cluster_api_port"`
 }
 
 // Default values
@@ -103,20 +93,14 @@ func DefaultConfig() *Config {
 			WSReadLimitBytes:    32768, // 32KB
 		},
 		Cluster: ClusterConfig{
-			QUICAddr:     "0.0.0.0",
-			QUICPort:     8443,
-			ClusterSeeds: []string{},
-			CertPath:     "certs/cluster-cert.pem",
-			KeyPath:      "certs/cluster-key.pem",
-			CAPath:       "certs/cluster-ca.pem",
-			AddressResolver: ResolverConfig{
-				Type:   "service",
-				Config: map[string]any{},
-			},
-			TLSVerifier: VerifierConfig{
-				Type:   "cn",
-				Config: map[string]any{},
-			},
+			QUICAddr:         "0.0.0.0",
+			QUICPort:         8323,
+			ClusterSeeds:     []string{},
+			CertPath:         "certs/cluster-cert.pem",
+			KeyPath:          "certs/cluster-key.pem",
+			CAPath:           "certs/cluster-ca.pem",
+			DiscoveryYMLPath: "./discovery.yml",
+			ClusterApiPort:   8321,
 		},
 	}
 }
@@ -184,15 +168,13 @@ func setDefaults(v *viper.Viper) {
 
 	// Cluster defaults
 	v.SetDefault("cluster.quic_addr", "0.0.0.0")
-	v.SetDefault("cluster.quic_port", 8443)
+	v.SetDefault("cluster.quic_port", 8323)
 	v.SetDefault("cluster.cluster_seeds", []string{})
 	v.SetDefault("cluster.cert_path", "certs/cluster-cert.pem")
 	v.SetDefault("cluster.key_path", "certs/cluster-key.pem")
 	v.SetDefault("cluster.ca_path", "certs/cluster-ca.pem")
-	v.SetDefault("cluster.address_resolver.type", "service")
-	v.SetDefault("cluster.address_resolver.config", map[string]any{})
-	v.SetDefault("cluster.tls_verifier.type", "cn")
-	v.SetDefault("cluster.tls_verifier.config", map[string]any{})
+	v.SetDefault("cluster.discovery_yml_path", "./discovery.yml")
+	v.SetDefault("cluster.cluster_api_port", 8321)
 }
 
 // Validate returns all validation errors
@@ -207,6 +189,10 @@ func (c *Config) Validate() error {
 	}
 	if c.API.DefaultMaxInflights < 1 {
 		errs = append(errs, fmt.Sprintf("invalid default_max_inflights: %d", c.API.DefaultMaxInflights))
+	}
+
+	if c.Cluster.DiscoveryYMLPath == "" {
+		errs = append(errs, "cluster.discovery_yml_path is required")
 	}
 
 	// Validate API TLS if enabled
@@ -225,54 +211,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Cluster.KeyPath == "" {
 		errs = append(errs, "cluster.key_path is required")
-	}
-
-	// Resolver validation
-	if c.Cluster.AddressResolver.Type == "" {
-		errs = append(errs, "cluster.address_resolver.type is required")
-	} else {
-		validResolvers := map[string]bool{"service": true, "dns": true, "static": true}
-		if !validResolvers[c.Cluster.AddressResolver.Type] {
-			errs = append(errs, fmt.Sprintf("unknown address_resolver type: %q", c.Cluster.AddressResolver.Type))
-		} else {
-			// Validate required config for each resolver type
-			switch c.Cluster.AddressResolver.Type {
-			case "dns":
-				if _, ok := c.Cluster.AddressResolver.Config["domain"]; !ok {
-					errs = append(errs, "dns resolver requires 'domain' in address_resolver.config")
-				}
-			case "static":
-				if _, ok := c.Cluster.AddressResolver.Config["peers"]; !ok {
-					errs = append(errs, "static resolver requires 'peers' in address_resolver.config")
-				}
-			case "service":
-				// No required config, port is optional
-			}
-		}
-	}
-
-	// TLS Verifier validation
-	if c.Cluster.TLSVerifier.Type == "" {
-		errs = append(errs, "cluster.tls_verifier.type is required")
-	} else {
-		validVerifiers := map[string]bool{"dns": true, "cn": true, "spiffe": true}
-		if !validVerifiers[c.Cluster.TLSVerifier.Type] {
-			errs = append(errs, fmt.Sprintf("unknown tls_verifier type: %q", c.Cluster.TLSVerifier.Type))
-		} else {
-			// Validate required config for each verifier type
-			switch c.Cluster.TLSVerifier.Type {
-			case "dns":
-				if _, ok := c.Cluster.TLSVerifier.Config["domain"]; !ok {
-					errs = append(errs, "dns verifier requires 'domain' in tls_verifier.config")
-				}
-			case "spiffe":
-				if _, ok := c.Cluster.TLSVerifier.Config["trust_domain"]; !ok {
-					errs = append(errs, "spiffe verifier requires 'trust_domain' in tls_verifier.config")
-				}
-			case "cn":
-				// No config needed
-			}
-		}
 	}
 
 	if len(errs) > 0 {

@@ -34,11 +34,12 @@ func TestFullSystemFlow(t *testing.T) {
 
 	domain := "localhost"
 	integrationDir, _ := os.Getwd()
-	caCertDir := filepath.Join(integrationDir, "cert")
+	caCertDir := filepath.Join(integrationDir, "certs")
 
 	logger, cluster, client, _ := SetupFullTestSystem(t, ctx, caCertDir, domain)
-	defer func() { _ = cluster.Terminate(ctx) }()
-
+	t.Cleanup(func() {
+		_ = cluster.Terminate(ctx)
+	})
 	// ============================================
 	// Topic Management
 	// ============================================
@@ -63,6 +64,8 @@ func TestFullSystemFlow(t *testing.T) {
 	consumerID := client.AddConsumer(topic)
 	t.Logf("Subscribed consumer %d to topics: %s", consumerID, topic)
 	_ = client.Start()
+
+	time.Sleep(500 * time.Millisecond)
 
 	// Push jobs
 	_ = client.AddJob("order-1", "orders", []byte(`{"item":"book"}`))
@@ -89,7 +92,7 @@ func TestTopicIsolation(t *testing.T) {
 
 	domain := "localhost"
 	integrationDir, _ := os.Getwd()
-	caCertDir := filepath.Join(integrationDir, "cert")
+	caCertDir := filepath.Join(integrationDir, "certs")
 
 	_, cluster, client, _ := SetupFullTestSystem(t, ctx, caCertDir, domain)
 	defer func() { _ = cluster.Terminate(ctx) }()
@@ -112,6 +115,8 @@ func TestTopicIsolation(t *testing.T) {
 	consumer2 := client.AddConsumer("shipments")
 
 	_ = client.Start()
+
+	time.Sleep(500 * time.Millisecond)
 
 	_ = client.AddJob("order-only", "orders", nil)
 	_ = client.AddJob("ship-only", "shipments", nil)
@@ -137,7 +142,7 @@ func TestMultiConsumers(t *testing.T) {
 
 	domain := "localhost"
 	integrationDir, _ := os.Getwd()
-	caCertDir := filepath.Join(integrationDir, "cert")
+	caCertDir := filepath.Join(integrationDir, "certs")
 
 	_, cluster, client, _ := SetupFullTestSystem(t, ctx, caCertDir, domain)
 	defer func() { _ = cluster.Terminate(ctx) }()
@@ -162,6 +167,8 @@ func TestMultiConsumers(t *testing.T) {
 		consumers[i] = client.AddConsumer("orders")
 	}
 	_ = client.Start()
+
+	time.Sleep(500 * time.Millisecond)
 
 	// Push 9 jobs
 	for i := range 9 {

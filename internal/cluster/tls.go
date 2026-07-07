@@ -90,6 +90,7 @@ func loadClientTLSConfig(certPath, keyPath, caCertPath string) (*tls.Config, err
 		RootCAs:                caCertPool,
 		MinVersion:             tls.VersionTLS13,
 		SessionTicketsDisabled: true,
+		InsecureSkipVerify:     true,
 	}
 
 	return tlsConfig, nil

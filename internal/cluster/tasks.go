@@ -163,17 +163,34 @@ func (a *ClusterAgent) syncConnectionsTask(awg *sync.WaitGroup, tick time.Durati
 			return
 
 		case <-ticker.C:
-			nodesConInfo := a.ListPeersAddrServerName()
-			var curVoterIDs []string
-			for _, node := range nodesConInfo {
-				curVoterIDs = append(curVoterIDs, node.NodeID)
+			a.discoveryMu.Lock()
+			// Check if we have any peers
+			if len(a.discovery) == 0 {
+				a.logger.Warn("no discovery peers available, skipping connection sync")
+				continue
+			}
+			// Get current desired nodes
+			peers := make([]PeerInfo, 0, len(a.discovery))
+			for _, node := range a.discovery {
+				peers = append(peers, node)
+			}
+			a.discoveryMu.Unlock()
+
+			if len(peers) == 0 {
+				a.logger.Warn("no discovery peers available, skipping connection sync")
+				continue
+			}
+
+			var curPeerIDs []string
+			for _, node := range peers {
+				curPeerIDs = append(curPeerIDs, node.NodeID)
 			}
 
 			// Step 1: Remove nodes that are no longer in the desired list
 			a.mu.Lock()
 
 			for nodeID := range a.sendConns {
-				if !slices.Contains(curVoterIDs, nodeID) {
+				if !slices.Contains(curPeerIDs, nodeID) {
 					if conn := a.sendConns[nodeID]; conn != nil {
 						_ = conn.CloseWithError(0, "node removed from cluster")
 					}
@@ -184,7 +201,7 @@ func (a *ClusterAgent) syncConnectionsTask(awg *sync.WaitGroup, tick time.Durati
 			}
 
 			for nodeID := range a.recvConns {
-				if !slices.Contains(curVoterIDs, nodeID) {
+				if !slices.Contains(curPeerIDs, nodeID) {
 					if conn := a.recvConns[nodeID]; conn != nil {
 						_ = conn.CloseWithError(0, "node removed from cluster")
 					}
@@ -198,9 +215,9 @@ func (a *ClusterAgent) syncConnectionsTask(awg *sync.WaitGroup, tick time.Durati
 
 			var wg sync.WaitGroup
 			// Step 2: Connect nodes that need to connect and not already connected in parallel
-			for _, ni := range nodesConInfo {
+			for _, ni := range peers {
 				wg.Add(1)
-				go func(ni PeerResolvedInfo) {
+				go func(ni PeerInfo) {
 					defer wg.Done()
 					if con, ok := a.sendConns[ni.NodeID]; !ok || con.Context().Err() != nil {
 						if err := a.dialSendConnection(ni); err != nil {

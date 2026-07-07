@@ -38,7 +38,7 @@ func TestProbeCluster(t *testing.T) {
 
 	domain := "localhost"
 	integrationDir, err := os.Getwd()
-	caCertDir := filepath.Join(integrationDir, "cert")
+	caCertDir := filepath.Join(integrationDir, "certs")
 
 	cluster, _, logger := SetupTestCluster(t, ctx, caCertDir, domain)
 	defer cluster.Terminate(ctx)
@@ -63,7 +63,7 @@ func TestLimitedVolumeEndToEnd(t *testing.T) {
 
 	domain := "localhost"
 	integrationDir, _ := os.Getwd()
-	caCertDir := filepath.Join(integrationDir, "cert")
+	caCertDir := filepath.Join(integrationDir, "certs")
 
 	// ============================================
 	// Setup Cluster
@@ -142,7 +142,7 @@ func TestLimitedVolumeProducers(t *testing.T) {
 
 	domain := "localhost"
 	integrationDir, _ := os.Getwd()
-	caCertDir := filepath.Join(integrationDir, "cert")
+	caCertDir := filepath.Join(integrationDir, "certs")
 
 	logger, cluster, client, _ := SetupFullTestSystem(t, ctx, caCertDir, domain)
 	defer cluster.Terminate(ctx)

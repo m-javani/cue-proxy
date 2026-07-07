@@ -16,6 +16,7 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
@@ -27,15 +28,14 @@ import (
 	"time"
 
 	"github.com/m-javani/cue-proxy/internal/app"
+	"github.com/m-javani/cue-proxy/internal/cluster"
 	"github.com/m-javani/cue-proxy/internal/config"
-	"github.com/m-javani/cue/pkg/discovery"
-	"github.com/m-javani/cue/pkg/verifier"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
 // StartProxy starts a real proxy instance connected to the provided test cluster
-func StartProxy(t *testing.T, ctx context.Context, logger *zap.Logger, proxyIdUint8 uint8, cluster *Cluster, caDir, domain string) (proxyID, proxyURL, wsURL string, stop func()) {
+func StartProxy(t *testing.T, ctx context.Context, logger *zap.Logger, proxyIdUint8 uint8, testCluster *TestCluster, caDir, domain string) (proxyID, proxyURL, wsURL string, stop func()) {
 	t.Helper()
 
 	proxyID = fmt.Sprintf("proxy%d", proxyIdUint8)
@@ -55,7 +55,7 @@ func StartProxy(t *testing.T, ctx context.Context, logger *zap.Logger, proxyIdUi
 	// === Use same CA from cluster ===
 	// Write CA cert temporarily so CreateNodeCertWithCAFile can find it
 	caCertPath := filepath.Join(caDir, "ca_cert.pem")
-	err = os.WriteFile(caCertPath, cluster.CACert, 0644)
+	err = os.WriteFile(caCertPath, testCluster.CACert, 0644)
 	require.NoError(t, err)
 	t.Cleanup(func() { os.Remove(caCertPath) })
 
@@ -78,13 +78,13 @@ func StartProxy(t *testing.T, ctx context.Context, logger *zap.Logger, proxyIdUi
 	cfg.Cluster.KeyPath = keyPath
 
 	// === Cluster Seeds (node names only - Docker network resolves them) ===
-	seedNames := make([]string, len(cluster.Nodes))
-	for i, node := range cluster.Nodes {
-		seedNames[i] = node.Name // "node1", "node2", ...
+	seedNames := make([]string, len(testCluster.Nodes))
+	for i, node := range testCluster.Nodes {
+		seedNames[i] = node.Name
 	}
 	cfg.Cluster.ClusterSeeds = seedNames
 
-	portMap := cluster.GetProxyMappedPorts()
+	portMap := testCluster.GetProxyMappedPorts()
 	addrsWithPortedMap := make(map[string]string, 0)
 	for name, port := range portMap {
 		addrsWithPortedMap[name] = fmt.Sprintf("localhost:%s", port)
@@ -93,12 +93,18 @@ func StartProxy(t *testing.T, ctx context.Context, logger *zap.Logger, proxyIdUi
 	leaderAvailable := atomic.Bool{}
 	leaderAvailable.Store(false)
 
+	discovery, err := cluster.LoadDiscoveryFile("./configs/discovery.yml")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load initial discovery file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// start fale api
+	go runFakeServer(t, discovery)
+
 	// Start proxy
 	go func() {
-		addrResolver := &discovery.StaticResolver{
-			Addresses: addrsWithPortedMap,
-		}
-		if err := app.RunProxy(ctx, cfg, logger, addrResolver, verifier.CNVerifier{}, &leaderAvailable); err != nil && ctx.Err() == nil {
+		if err := app.RunProxy(ctx, cfg, logger, &leaderAvailable, discovery); err != nil && ctx.Err() == nil {
 			logger.Error("proxy stopped with error", zap.Error(err))
 		}
 	}()
@@ -146,4 +152,24 @@ func isPortAvailable(port int) bool {
 	}
 	ln.Close()
 	return true
+}
+
+func runFakeServer(t *testing.T, discovery map[string]cluster.PeerInfo) {
+	// Pre-marshal the data
+	jsonData, _ := json.Marshal(discovery)
+
+	srv := &http.Server{
+		Addr: "127.0.0.1:8321",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet {
+				http.Error(w, `{"error": "method not allowed"}`, http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(jsonData)
+		}),
+	}
+
+	go srv.ListenAndServe()
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
 }
