@@ -97,7 +97,6 @@ func NewClusterAgent(
 	certPath, keyPath, caCertPath string,
 	producerCh <-chan model.ProxyRequestWithRespCh,
 	router api.Router,
-	cluster_seeds []string,
 	discovery map[string]PeerInfo,
 	logger *zap.Logger,
 	leaderAvailable *atomic.Bool,
@@ -130,7 +129,7 @@ func NewClusterAgent(
 		metrics:         internal.GetClusterMetrics(),
 		router:          router,
 		cueTopology: CueTopology{
-			Voters:   cluster_seeds,
+			Voters:   []string{},
 			Learners: []string{},
 		},
 		discovery:          discovery,

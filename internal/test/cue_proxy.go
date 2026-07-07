@@ -77,13 +77,6 @@ func StartProxy(t *testing.T, ctx context.Context, logger *zap.Logger, proxyIdUi
 	cfg.Cluster.CertPath = certPath
 	cfg.Cluster.KeyPath = keyPath
 
-	// === Cluster Seeds (node names only - Docker network resolves them) ===
-	seedNames := make([]string, len(testCluster.Nodes))
-	for i, node := range testCluster.Nodes {
-		seedNames[i] = node.Name
-	}
-	cfg.Cluster.ClusterSeeds = seedNames
-
 	portMap := testCluster.GetProxyMappedPorts()
 	addrsWithPortedMap := make(map[string]string, 0)
 	for name, port := range portMap {

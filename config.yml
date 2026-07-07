@@ -30,10 +30,6 @@ api:
 cluster:
   quic_addr: "0.0.0.0"
   quic_port: 8322
-  cluster_seeds:
-    - node1
-    - node2
-    - node3
   cert_path: "certs/cluster-cert.pem"
   key_path: "certs/cluster-key.pem"
   ca_path: "certs/cluster-ca.pem"

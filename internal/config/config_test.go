@@ -42,9 +42,6 @@ api:
 cluster:
   quic_addr: "127.0.0.1"
   quic_port: 9443
-  cluster_seeds:
-    - "seed1:8323"
-    - "seed2:8323"
   cert_path: "custom/cluster-cert.pem"
   key_path: "custom/cluster-key.pem"
   ca_path: "custom/cluster-ca.pem"
@@ -96,9 +93,6 @@ cluster:
 		// Verify Cluster values
 		if cfg.Cluster.QUICPort != 9443 {
 			t.Errorf("expected QUICPort 9443, got %d", cfg.Cluster.QUICPort)
-		}
-		if len(cfg.Cluster.ClusterSeeds) != 2 {
-			t.Errorf("expected 2 cluster seeds, got %d", len(cfg.Cluster.ClusterSeeds))
 		}
 		if cfg.Cluster.CertPath != "custom/cluster-cert.pem" {
 			t.Errorf("expected Cluster CertPath 'custom/cluster-cert.pem', got '%s'", cfg.Cluster.CertPath)
