@@ -61,9 +61,6 @@ type ClusterConfig struct {
 	QUICAddr string `mapstructure:"quic_addr"`
 	QUICPort int    `mapstructure:"quic_port"`
 
-	// Cluster seeds (other proxy nodes for discovery)
-	ClusterSeeds []string `mapstructure:"cluster_seeds"`
-
 	// TLS settings for Cluster (QUIC)
 	CertPath string `mapstructure:"cert_path"`
 	KeyPath  string `mapstructure:"key_path"`
@@ -95,7 +92,6 @@ func DefaultConfig() *Config {
 		Cluster: ClusterConfig{
 			QUICAddr:         "0.0.0.0",
 			QUICPort:         8323,
-			ClusterSeeds:     []string{},
 			CertPath:         "certs/cluster-cert.pem",
 			KeyPath:          "certs/cluster-key.pem",
 			CAPath:           "certs/cluster-ca.pem",

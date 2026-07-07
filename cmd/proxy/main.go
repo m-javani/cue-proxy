@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"sync/atomic"
 	"syscall"
 
@@ -46,7 +45,6 @@ func main() {
 	clusterCertPath := flag.String("cluster-cert", "", "Cluster TLS certificate path (overrides config)")
 	clusterKeyPath := flag.String("cluster-key", "", "Cluster TLS key path (overrides config)")
 	clusterCaPath := flag.String("cluster-ca", "", "Cluster CA certificate path (overrides config)")
-	clusterSeeds := flag.String("seed", "", "Comma-separated cluster seed nodes (e.g., node1,node2,node3)")
 	clusterApiPort := flag.Int("cluster-api-port", 0, "Cluster api port (overrides config)")
 	proxyID := flag.String("proxy-id", "", "Proxy ID (REQUIRED, must match certificate identity)")
 	discoveryYMLPath := flag.String("discovery-yml", "./discovery.yml", "Path to discovery.yml file containing initial cluster peer info")
@@ -79,7 +77,7 @@ func main() {
 		*quicAddr, *quicPort,
 		*apiCertPath, *apiKeyPath,
 		*clusterCertPath, *clusterKeyPath, *clusterCaPath,
-		*clusterSeeds, *proxyID, *logLevel, *discoveryYMLPath, *clusterApiPort,
+		*proxyID, *logLevel, *discoveryYMLPath, *clusterApiPort,
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to build config: %v\n", err)
@@ -114,7 +112,7 @@ func buildConfig(
 	quicAddr string, quicPort int,
 	apiCertPath, apiKeyPath,
 	clusterCertPath, clusterKeyPath, clusterCaPath string,
-	clusterSeeds string, proxyID string, logLevel string,
+	proxyID string, logLevel string,
 	discoveryYMLPath string, clusterApiPort int,
 ) (*config.Config, *zap.Logger, error) {
 	// Setup logger
@@ -177,16 +175,11 @@ func buildConfig(
 	if clusterCaPath != "" {
 		cfg.Cluster.CAPath = clusterCaPath
 	}
-	if clusterSeeds != "" {
-		seeds := strings.Split(clusterSeeds, ",")
-		cfg.Cluster.ClusterSeeds = seeds
-	}
 
 	logger.Info("configuration loaded",
 		zap.String("proxy_id", cfg.ProxyID),
 		zap.String("api_address", cfg.GetAPIAddress()),
 		zap.String("quic_address", cfg.GetQUICAddress()),
-		zap.Strings("cluster_seeds", cfg.Cluster.ClusterSeeds),
 	)
 
 	return cfg, logger, nil

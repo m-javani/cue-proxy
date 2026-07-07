@@ -72,7 +72,6 @@ func RunProxy(ctx context.Context, cfg *config.Config, logger *zap.Logger, leade
 		cfg.Cluster.CAPath,
 		producerCh,
 		router,
-		cfg.Cluster.ClusterSeeds,
 		discovery,
 		logger,
 		leaderAvailable,
