@@ -3,92 +3,105 @@ package cluster
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"sync"
 	"time"
 
+	"github.com/m-javani/cue-proxy/internal/config"
 	"go.uber.org/zap"
 )
 
+// syncPeers starts continuous background polling for HTTP discovery.
+// It returns immediately if the discovery kind is not HTTP.
+func (a *ClusterAgent) syncPeers(awg *sync.WaitGroup, tick time.Duration) {
+	defer awg.Done()
+	if a.discoveryKind != config.DiscoveryKindHttp { // Use your internal.DiscoveryKindHttp constant if available
+		return
+	}
+
+	// Immediate first sync
+	a.updateDiscovery()
+
+	ticker := time.NewTicker(tick)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			a.updateDiscovery()
+		}
+	}
+}
+
+// updateDiscovery refreshes peer information from the external HTTP endpoint.
 func (a *ClusterAgent) updateDiscovery() {
 	if !a.discovering.CompareAndSwap(false, true) {
 		return
 	}
 	defer a.discovering.Store(false)
 
-	// Try leader first if available
-	if a.leaderAvailable.Load() {
-		if val := a.currentLeader.Load(); val != nil {
-			if leaderID, ok := val.(string); ok {
-				a.discoveryMu.RLock()
-				peer, exist := a.discovery[leaderID]
-				a.discoveryMu.RUnlock()
-				if exist {
-					if err := a.fetchDiscovery([]string{peer.IP}); err == nil {
-						a.logger.Info("discovery updated from leader", zap.String("leader", leaderID))
-						return
-					}
-				}
-			}
-		}
+	peers, err := a.refreshFromHTTP()
+	if err != nil {
+		a.logger.Error("failed to refresh peers from HTTP", zap.Error(err))
+		return
 	}
-
-	// Try all available nodes in discovery
-	a.discoveryMu.RLock()
-	targets := make([]string, 0, len(a.discovery))
-	for _, peer := range a.discovery {
-		targets = append(targets, peer.IP)
-	}
-	a.discoveryMu.RUnlock()
-
-	if len(targets) == 0 {
-		a.logger.Warn("no discovery targets available to fetch cluster peers")
+	if len(peers) == 0 {
+		a.logger.Warn("received empty peers list from HTTP")
 		return
 	}
 
-	if err := a.fetchDiscovery(targets); err != nil {
-		a.logger.Sugar().Warnf("failed to upadte discovery. %s", err.Error())
-	}
+	a.discoveryMu.Lock()
+	a.discovery = peers
+	a.discoveryMu.Unlock()
+
+	a.logger.Info("discovery updated from HTTP", zap.Int("peers", len(peers)))
 }
 
-func (a *ClusterAgent) fetchDiscovery(ips []string) error {
-	for _, ip := range ips {
-		peers, err := a.getPeersFromClusterAPI(ip, a.clusterApiPort)
-		if err == nil && len(peers) > 0 {
-			a.discoveryMu.Lock()
-			a.discovery = peers
-			a.discoveryMu.Unlock()
-			a.logger.Info("discovery updated from cluster", zap.String("node", ip), zap.Int("peers", len(peers)))
-			return nil
-		}
+// refreshFromHTTP fetches the latest peers from the external HTTP discovery endpoint.
+func (a *ClusterAgent) refreshFromHTTP() (map[string]PeerInfo, error) {
+	if a.discoveryHTTPHost == "" {
+		return nil, fmt.Errorf("no HTTP endpoint configured")
 	}
-	return fmt.Errorf("failed to update discovery from all targets")
-}
-
-func (a *ClusterAgent) getPeersFromClusterAPI(ip string, port int) (map[string]PeerInfo, error) {
-	url := fmt.Sprintf("http://%s:%d/discovery/peers", ip, port)
+	addr := fmt.Sprintf("%s?client=cueproxy", a.discoveryHTTPHost)
+	req, err := http.NewRequest(http.MethodGet, addr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
 
-	resp, err := client.Get(url)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %s", resp.Status)
+		return nil, fmt.Errorf("http status not OK: %d", resp.StatusCode)
 	}
 
-	var peers map[string]PeerInfo
-	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if len(peers) == 0 {
-		return nil, fmt.Errorf("received empty peer list")
+	// Versioned response first
+	var httpResp httpPeersResponse
+	if err := json.Unmarshal(body, &httpResp); err == nil && httpResp.Version > 0 {
+		if httpResp.Version != 1 {
+			return nil, fmt.Errorf("unsupported version: %d", httpResp.Version)
+		}
+		peers := make(map[string]PeerInfo, len(httpResp.Peers))
+		for _, p := range httpResp.Peers {
+			peers[p.NodeID] = p
+		}
+		return peers, nil
 	}
 
-	return peers, nil
+	return nil, fmt.Errorf("received empty peer list")
 }

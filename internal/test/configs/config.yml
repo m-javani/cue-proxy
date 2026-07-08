@@ -33,5 +33,9 @@ cluster:
   cert_path: "certs/cluster-cert.pem"
   key_path: "certs/cluster-key.pem"
   ca_path: "certs/cluster-ca.pem"
-  discovery_yml_path: "./discovery.yml"  # required for initial discovery
-  cluster_api_port: 8321
+  # Discovery configuration
+  discovery_kind: "static"  # "static" or "http"
+  # Required when discovery_kind = "static"
+  discovery_yml_path: "./discovery.yml"
+  # Required when discovery_kind = "http"
+  # discovery_http_host: "http://discovery-service:8080/discovery/peers"

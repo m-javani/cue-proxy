@@ -25,6 +25,7 @@ import (
 
 	"github.com/m-javani/cue-proxy/internal"
 	"github.com/m-javani/cue-proxy/internal/api"
+	"github.com/m-javani/cue-proxy/internal/config"
 	"github.com/m-javani/cue-proxy/internal/model"
 	"github.com/quic-go/quic-go"
 	"go.uber.org/zap"
@@ -58,10 +59,12 @@ type ClusterAgent struct {
 	cueTopology     CueTopology
 	topologyMu      sync.RWMutex
 
-	discovery      map[string]PeerInfo
-	clusterApiPort int
-	discoveryMu    sync.RWMutex
-	discovering    atomic.Bool
+	discovery         map[string]PeerInfo
+	discoveryKind     config.DiscoveryKind
+	discoveryYMLPath  string
+	discoveryHTTPHost string
+	discoveryMu       sync.RWMutex
+	discovering       atomic.Bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -100,7 +103,9 @@ func NewClusterAgent(
 	discovery map[string]PeerInfo,
 	logger *zap.Logger,
 	leaderAvailable *atomic.Bool,
-	ClusterApiPort int,
+	discoveryKind config.DiscoveryKind,
+	discoveryYMLPath string,
+	discoveryHTTPHost string,
 ) (*ClusterAgent, error) {
 	tlsConfig, err := loadClientTLSConfig(certPath, keyPath, caCertPath)
 	if err != nil {
@@ -145,8 +150,11 @@ func NewClusterAgent(
 		doneCmdBatchMu:     sync.Mutex{},
 		doneCmdBatchBuffer: make(map[string][]string, 0),
 		reqIDCounter:       atomic.Uint64{},
-		clusterApiPort:     ClusterApiPort,
 		discoveryMu:        sync.RWMutex{},
+		discoveryKind:      discoveryKind,
+		discoveryYMLPath:   discoveryYMLPath,
+		discoveryHTTPHost:  discoveryHTTPHost,
+		discovering:        atomic.Bool{},
 	}
 
 	agent.currentLeader.Store("")
@@ -173,6 +181,9 @@ func (a *ClusterAgent) Run() {
 
 	wg.Add(1)
 	go a.flushDoneCmdsTasks(&wg, 500*time.Millisecond)
+
+	wg.Add(1)
+	go a.syncPeers(&wg, 2*time.Second)
 
 	a.logger.Info("ClusterAgent started", zap.String("proxy_id", a.proxyID))
 

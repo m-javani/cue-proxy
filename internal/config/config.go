@@ -56,6 +56,37 @@ type APIConfig struct {
 	KeyPath    string `mapstructure:"key_path"`
 }
 
+type DiscoveryKind uint8
+
+const (
+	DiscoveryKindStatic DiscoveryKind = iota
+	DiscoveryKindHttp
+)
+
+// String returns the string representation of DiscoveryKind
+func (d DiscoveryKind) String() string {
+	switch d {
+	case DiscoveryKindStatic:
+		return "static"
+	case DiscoveryKindHttp:
+		return "http"
+	default:
+		return "unknown"
+	}
+}
+
+// ParseDiscoveryKind converts a string to DiscoveryKind
+func ParseDiscoveryKind(s string) (DiscoveryKind, error) {
+	switch strings.ToLower(s) {
+	case "static":
+		return DiscoveryKindStatic, nil
+	case "http":
+		return DiscoveryKindHttp, nil
+	default:
+		return DiscoveryKindStatic, fmt.Errorf("unknown discovery kind: %s", s)
+	}
+}
+
 type ClusterConfig struct {
 	// QUIC server (this proxy listens on)
 	QUICAddr string `mapstructure:"quic_addr"`
@@ -66,8 +97,10 @@ type ClusterConfig struct {
 	KeyPath  string `mapstructure:"key_path"`
 	CAPath   string `mapstructure:"ca_path"`
 
-	DiscoveryYMLPath string `mapstructure:"discovery_yml_path"`
-	ClusterApiPort   int    `mapstructure:"cluster_api_port"`
+	DiscoveryKind     string `mapstructure:"discovery_kind"`
+	DiscoveryYMLPath  string `mapstructure:"discovery_yml_path"`  // Required for DiscoveryKindStatic
+	DiscoveryHTTPHost string `mapstructure:"discovery_http_host"` // Required for DiscoveryKindHttp
+
 }
 
 // Default values
@@ -95,8 +128,8 @@ func DefaultConfig() *Config {
 			CertPath:         "certs/cluster-cert.pem",
 			KeyPath:          "certs/cluster-key.pem",
 			CAPath:           "certs/cluster-ca.pem",
+			DiscoveryKind:    "static",
 			DiscoveryYMLPath: "./discovery.yml",
-			ClusterApiPort:   8321,
 		},
 	}
 }
@@ -170,7 +203,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cluster.key_path", "certs/cluster-key.pem")
 	v.SetDefault("cluster.ca_path", "certs/cluster-ca.pem")
 	v.SetDefault("cluster.discovery_yml_path", "./discovery.yml")
-	v.SetDefault("cluster.cluster_api_port", 8321)
+	v.SetDefault("cluster.discovery_kind", "static")
 }
 
 // Validate returns all validation errors
@@ -187,8 +220,9 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Sprintf("invalid default_max_inflights: %d", c.API.DefaultMaxInflights))
 	}
 
-	if c.Cluster.DiscoveryYMLPath == "" {
-		errs = append(errs, "cluster.discovery_yml_path is required")
+	kind, _ := ParseDiscoveryKind(c.Cluster.DiscoveryKind)
+	if kind == DiscoveryKindStatic && c.Cluster.DiscoveryYMLPath == "" {
+		errs = append(errs, "cluster.discovery_yml_path is required for static discovery")
 	}
 
 	// Validate API TLS if enabled
@@ -209,9 +243,39 @@ func (c *Config) Validate() error {
 		errs = append(errs, "cluster.key_path is required")
 	}
 
+	// Validate discovery configuration
+	if err := validateDiscoveryConfig(&c.Cluster); err != nil {
+		errs = append(errs, err.Error())
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n- %s", strings.Join(errs, "\n- "))
 	}
+	return nil
+}
+
+// validateDiscoveryConfig validates the discovery configuration
+func validateDiscoveryConfig(cfg *ClusterConfig) error {
+	kind, err := ParseDiscoveryKind(cfg.DiscoveryKind)
+	if err != nil {
+		return fmt.Errorf("invalid discovery_kind '%s': %w", cfg.DiscoveryKind, err)
+	}
+
+	switch kind {
+	case DiscoveryKindStatic:
+		if strings.TrimSpace(cfg.DiscoveryYMLPath) == "" {
+			return fmt.Errorf("discovery_yml_path is required when discovery_kind=static")
+		}
+
+	case DiscoveryKindHttp:
+		if strings.TrimSpace(cfg.DiscoveryHTTPHost) == "" {
+			return fmt.Errorf("discovery_http_host is required when discovery_kind=http")
+		}
+
+	default:
+		return fmt.Errorf("unsupported discovery kind: %s", cfg.DiscoveryKind)
+	}
+
 	return nil
 }
 

@@ -1,15 +1,18 @@
 # Changelog
 
-## [0.3.0] - 2026-07-07
+## [0.3.0] - 2026-07-08
 ### Changed
 - **BREAKING**: Discard resolver and verifier components
 - Simplified QUIC verifier implementation
-- Update discovery mechanism to use cluster-based updates
+- Update discovery mechanism to use external HTTP or static file only
+- Removed cluster-based discovery (no longer queries leader or nodes)
 - Replace test containers with Docker Compose
+- Renamed `IP` to `Host` in `PeerInfo` to support layered/network-agnostic addressing
 
 ### Fixed
 - Streamline verification process by removing redundant resolver/verifier layers
-- Improve discovery reliability with cluster-aware updates
+- Improve discovery reliability with decoupled external updates
+- TLS identity verification aligned with `Host` field changes
 
 ## [0.2.0] - 2026-07-01
 ### Changed

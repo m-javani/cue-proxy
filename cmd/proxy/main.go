@@ -45,9 +45,10 @@ func main() {
 	clusterCertPath := flag.String("cluster-cert", "", "Cluster TLS certificate path (overrides config)")
 	clusterKeyPath := flag.String("cluster-key", "", "Cluster TLS key path (overrides config)")
 	clusterCaPath := flag.String("cluster-ca", "", "Cluster CA certificate path (overrides config)")
-	clusterApiPort := flag.Int("cluster-api-port", 0, "Cluster api port (overrides config)")
 	proxyID := flag.String("proxy-id", "", "Proxy ID (REQUIRED, must match certificate identity)")
+	discoveryKind := flag.String("discovery-kind", "static", "Discovery kind static|http")
 	discoveryYMLPath := flag.String("discovery-yml", "./discovery.yml", "Path to discovery.yml file containing initial cluster peer info")
+	discoveryHTTPHost := flag.String("discovery-host", "", "Uri to external http discovery endpoint")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Proxy Server v%s\n\n", version)
@@ -77,7 +78,7 @@ func main() {
 		*quicAddr, *quicPort,
 		*apiCertPath, *apiKeyPath,
 		*clusterCertPath, *clusterKeyPath, *clusterCaPath,
-		*proxyID, *logLevel, *discoveryYMLPath, *clusterApiPort,
+		*proxyID, *logLevel, *discoveryKind, *discoveryYMLPath, *discoveryHTTPHost,
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to build config: %v\n", err)
@@ -94,10 +95,17 @@ func main() {
 	leaderAvailable := atomic.Bool{}
 	leaderAvailable.Store(false)
 
-	discovery, err := cluster.LoadDiscoveryFile(cfg.Cluster.DiscoveryYMLPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load initial discovery file: %v\n", err)
-		os.Exit(1)
+	var discovery map[string]cluster.PeerInfo
+	kind, _ := config.ParseDiscoveryKind(cfg.Cluster.DiscoveryKind)
+	if kind == config.DiscoveryKindStatic {
+		discovery, err = cluster.LoadDiscoveryFile(cfg.Cluster.DiscoveryYMLPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load initial discovery file: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// HTTP discovery: start empty, syncPeers will populate
+		discovery = make(map[string]cluster.PeerInfo)
 	}
 
 	if err := app.RunProxy(ctx, cfg, logger, &leaderAvailable, discovery); err != nil {
@@ -113,7 +121,7 @@ func buildConfig(
 	apiCertPath, apiKeyPath,
 	clusterCertPath, clusterKeyPath, clusterCaPath string,
 	proxyID string, logLevel string,
-	discoveryYMLPath string, clusterApiPort int,
+	discoveryKind string, discoveryYMLPath string, discoveryHTTPHost string,
 ) (*config.Config, *zap.Logger, error) {
 	// Setup logger
 	var logger *zap.Logger
@@ -138,8 +146,15 @@ func buildConfig(
 	}
 
 	cfg.ProxyID = proxyID
-	cfg.Cluster.DiscoveryYMLPath = discoveryYMLPath
-	cfg.Cluster.ClusterApiPort = clusterApiPort
+	if discoveryKind != "" {
+		cfg.Cluster.DiscoveryKind = discoveryKind
+	}
+	if discoveryYMLPath != "" {
+		cfg.Cluster.DiscoveryYMLPath = discoveryYMLPath
+	}
+	if discoveryHTTPHost != "" {
+		cfg.Cluster.DiscoveryHTTPHost = discoveryHTTPHost
+	}
 
 	if apiHost != "" {
 		cfg.API.Host = apiHost

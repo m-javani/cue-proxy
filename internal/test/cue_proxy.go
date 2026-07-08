@@ -92,7 +92,7 @@ func StartProxy(t *testing.T, ctx context.Context, logger *zap.Logger, proxyIdUi
 		os.Exit(1)
 	}
 
-	// start fale api
+	// start fake api
 	go runFakeServer(t, discovery)
 
 	// Start proxy
