@@ -91,10 +91,7 @@ func (a *ClusterAgent) refreshFromHTTP() (map[string]PeerInfo, error) {
 	}
 
 	// Versioned response first
-	var httpResp struct {
-		Version int        `json:"version"`
-		Peers   []PeerInfo `json:"peers"`
-	}
+	var httpResp httpPeersResponse
 	if err := json.Unmarshal(body, &httpResp); err == nil && httpResp.Version > 0 {
 		if httpResp.Version != 1 {
 			return nil, fmt.Errorf("unsupported version: %d", httpResp.Version)
