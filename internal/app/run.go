@@ -62,6 +62,11 @@ func RunProxy(ctx context.Context, cfg *config.Config, logger *zap.Logger, leade
 		metrics,
 	)
 
+	discoveryKind, err := config.ParseDiscoveryKind(cfg.Cluster.DiscoveryKind)
+	if err != nil {
+		return fmt.Errorf("failed to parse discovery kind: %w", err)
+	}
+
 	// Create Cluster Agent
 	clusterAgent, err := cluster.NewClusterAgent(
 		cfg.ProxyID,
@@ -75,7 +80,9 @@ func RunProxy(ctx context.Context, cfg *config.Config, logger *zap.Logger, leade
 		discovery,
 		logger,
 		leaderAvailable,
-		cfg.Cluster.ClusterApiPort,
+		discoveryKind,
+		cfg.Cluster.DiscoveryYMLPath,
+		cfg.Cluster.DiscoveryHTTPHost,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create cluster agent: %w", err)

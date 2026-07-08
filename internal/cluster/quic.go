@@ -83,7 +83,7 @@ func (s *ClusterAgent) VerifyTLSIdentity(cert *x509.Certificate, expected TLSIde
 
 	case IdentitySPIFFE:
 		for _, uri := range cert.URIs {
-			if uri.String() == expected.Value {
+			if uri.Scheme == "spiffe" && uri.String() == expected.Value {
 				return nil
 			}
 		}
@@ -99,7 +99,11 @@ func (a *ClusterAgent) dialWithHandshake(connType ConnectionType, peer PeerInfo)
 	defer cancel()
 
 	tlsConfig := a.clientTLSConfig.Clone()
-	remoteAddr := net.JoinHostPort(peer.IP, strconv.Itoa(int(peer.Port)))
+	host := peer.Host
+	if host == "" {
+		host = peer.NodeID
+	}
+	remoteAddr := net.JoinHostPort(host, strconv.Itoa(int(peer.Port)))
 
 	tlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {
 		if len(cs.PeerCertificates) == 0 {

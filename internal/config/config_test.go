@@ -236,9 +236,6 @@ func TestValidate(t *testing.T) {
 			{"cluster_missing_discovery", func(c *Config) {
 				c.Cluster.DiscoveryYMLPath = ""
 			}},
-			{"cluster_missing_discovery", func(c *Config) {
-				c.Cluster.DiscoveryYMLPath = ""
-			}},
 		}
 
 		for _, tc := range testCases {

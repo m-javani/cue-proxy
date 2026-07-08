@@ -35,25 +35,29 @@ func TestLoadDiscoveryFile(t *testing.T) {
 			content: `
 nodes:
   - node_id: node1
-    ip: 192.168.1.10
+    host: 192.168.1.10
     identity:
       kind: dns
       value: node1.example.com
   - node_id: node2
-    ip: 192.168.1.11
+    host: 192.168.1.11
     identity:
       kind: ip
       value: 192.168.1.11
   - node_id: node3
-    ip: 192.168.1.12
     identity:
       kind: spiffe
       value: spiffe://example.org/node3
+  - node_id: node4
+    host: 192.168.1.12
+    identity:
+      kind: dns
+      value: node4.example.com
 `,
 			expectedPeers: map[string]PeerInfo{
 				"node1": {
 					NodeID: "node1",
-					IP:     "192.168.1.10",
+					Host:   "192.168.1.10",
 					Identity: TLSIdentity{
 						Kind:  IdentityDNS,
 						Value: "node1.example.com",
@@ -61,7 +65,7 @@ nodes:
 				},
 				"node2": {
 					NodeID: "node2",
-					IP:     "192.168.1.11",
+					Host:   "192.168.1.11",
 					Identity: TLSIdentity{
 						Kind:  IdentityIP,
 						Value: "192.168.1.11",
@@ -69,10 +73,52 @@ nodes:
 				},
 				"node3": {
 					NodeID: "node3",
-					IP:     "192.168.1.12",
+					Host:   "", // Empty host - will fallback to NodeID
 					Identity: TLSIdentity{
 						Kind:  IdentitySPIFFE,
 						Value: "spiffe://example.org/node3",
+					},
+				},
+				"node4": {
+					NodeID: "node4",
+					Host:   "192.168.1.12",
+					Identity: TLSIdentity{
+						Kind:  IdentityDNS,
+						Value: "node4.example.com",
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "host is optional - uses node_id as fallback",
+			content: `
+nodes:
+  - node_id: node1
+    identity:
+      kind: dns
+      value: node1.example.com
+  - node_id: node2
+    host: ""
+    identity:
+      kind: ip
+      value: 192.168.1.2
+`,
+			expectedPeers: map[string]PeerInfo{
+				"node1": {
+					NodeID: "node1",
+					Host:   "",
+					Identity: TLSIdentity{
+						Kind:  IdentityDNS,
+						Value: "node1.example.com",
+					},
+				},
+				"node2": {
+					NodeID: "node2",
+					Host:   "",
+					Identity: TLSIdentity{
+						Kind:  IdentityIP,
+						Value: "192.168.1.2",
 					},
 				},
 			},
@@ -83,7 +129,7 @@ nodes:
 			content: `
 nodes: []
 `,
-			expectedPeers: map[string]PeerInfo{},
+			expectedPeers: nil,
 			expectError:   true,
 			errorContains: "no nodes defined",
 		},
@@ -92,12 +138,12 @@ nodes: []
 			content: `
 nodes:
   - node_id: node1
-    ip: 192.168.1.10
+    host: 192.168.1.10
     identity:
       kind: dns
       value: node1.example.com
   - node_id: node1
-    ip: 192.168.1.11
+    host: 192.168.1.11
     identity:
       kind: ip
       value: 192.168.1.11
@@ -109,7 +155,7 @@ nodes:
 			name: "missing required node_id",
 			content: `
 nodes:
-  - ip: 192.168.1.10
+  - host: 192.168.1.10
     identity:
       kind: dns
       value: node1.example.com
@@ -118,36 +164,11 @@ nodes:
 			errorContains: "node_id is required",
 		},
 		{
-			name: "missing required ip",
-			content: `
-nodes:
-  - node_id: node1
-    identity:
-      kind: dns
-      value: node1.example.com
-`,
-			expectError:   true,
-			errorContains: "ip is required",
-		},
-		{
-			name: "invalid ip address",
-			content: `
-nodes:
-  - node_id: node1
-    ip: invalid-ip
-    identity:
-      kind: dns
-      value: node1.example.com
-`,
-			expectError:   true,
-			errorContains: "invalid IP address",
-		},
-		{
 			name: "invalid identity kind",
 			content: `
 nodes:
   - node_id: node1
-    ip: 192.168.1.10
+    host: 192.168.1.10
     identity:
       kind: invalid
       value: node1.example.com
@@ -160,7 +181,7 @@ nodes:
 			content: `
 nodes:
   - node_id: node1
-    ip: 192.168.1.10
+    host: 192.168.1.10
     identity:
       kind: dns
       value: ""
@@ -173,13 +194,26 @@ nodes:
 			content: `
 nodes:
   - node_id: node1
-    ip: 192.168.1.10
+    host: 192.168.1.10
     identity:
       kind: spiffe
       value: example.org/node1
 `,
 			expectError:   true,
 			errorContains: "SPIFFE identity must start with spiffe://",
+		},
+		{
+			name: "invalid IP address when host is provided",
+			content: `
+nodes:
+  - node_id: node1
+    host: invalid-ip
+    identity:
+      kind: dns
+      value: node1.example.com
+`,
+			expectError:   true,
+			errorContains: "invalid IP address",
 		},
 	}
 

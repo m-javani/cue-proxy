@@ -17,6 +17,7 @@ package cluster
 import (
 	"time"
 
+	"github.com/m-javani/cue-proxy/internal/config"
 	"github.com/m-javani/cue-proxy/internal/model"
 	"go.uber.org/zap"
 )
@@ -129,20 +130,23 @@ func (a *ClusterAgent) evaluateLeadership(claimedLeader string, hb *model.ToProx
 			a.cueTopology.Leader = claimedLeader
 			a.cueTopology.Term = hb.Term
 
-			// compare before mutate
 			updated := false
-			if len(a.cueTopology.Voters) != len(hb.Voters) {
-				updated = true
-			} else {
-				// Create a map for quick lookup
-				voterMap := make(map[string]bool, len(a.cueTopology.Voters))
-				for _, v := range a.cueTopology.Voters {
-					voterMap[v] = true
-				}
-				for _, v := range hb.Voters {
-					if !voterMap[v] {
-						updated = true
-						break
+			// call discovery update only if discovery is not static
+			if a.discoveryKind == config.DiscoveryKindHttp {
+				// compare before mutate
+				if len(a.cueTopology.Voters) != len(hb.Voters) {
+					updated = true
+				} else {
+					// Create a map for quick lookup
+					voterMap := make(map[string]bool, len(a.cueTopology.Voters))
+					for _, v := range a.cueTopology.Voters {
+						voterMap[v] = true
+					}
+					for _, v := range hb.Voters {
+						if !voterMap[v] {
+							updated = true
+							break
+						}
 					}
 				}
 			}
