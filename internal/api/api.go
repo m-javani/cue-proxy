@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,7 +55,7 @@ type ProxyApi struct {
 	router Router // Injected from top layer
 
 	// Channels to/from ClusterAgent
-	producerCh chan<- model.ProxyRequestWithRespCh
+	producerCh chan<- model.ApiRequestWithRespCh
 
 	consumers       map[string]*Consumer
 	consumersByUUID map[string]*Consumer
@@ -68,7 +67,7 @@ type ProxyApi struct {
 	leaderAvailable *atomic.Bool
 	ctx             context.Context
 
-	reqIDCounter atomic.Uint64
+	reqIDCounter atomic.Uint32
 }
 
 func NewProxyApi(
@@ -76,7 +75,7 @@ func NewProxyApi(
 	logger *zap.Logger,
 	authenticator *Authenticator,
 	router Router,
-	producerCh chan<- model.ProxyRequestWithRespCh,
+	producerCh chan<- model.ApiRequestWithRespCh,
 	cfg *config.APIConfig,
 	httpAddr string,
 	ctx context.Context,
@@ -97,12 +96,12 @@ func NewProxyApi(
 		ctx:             ctx,
 		leaderAvailable: leaderAvailable,
 		httpServer:      &http.Server{},
-		reqIDCounter:    atomic.Uint64{},
+		reqIDCounter:    atomic.Uint32{},
 	}
 }
 
-func (p *ProxyApi) nextRequestID() string {
-	return strconv.FormatUint(p.reqIDCounter.Add(1), 36)
+func (p *ProxyApi) nextRequestID() uint32 {
+	return p.reqIDCounter.Add(1)
 }
 
 func (p *ProxyApi) Start() error {
@@ -178,8 +177,8 @@ func (p *ProxyApi) SetupHTTPServer(addr string) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", p.HealthHandler)
 	mux.Handle("/metrics", p.MetricsHandler())
-	mux.HandleFunc("/producer/topic", p.withLeaderCheck(p.AddTopicHandler))
-	mux.HandleFunc("/producer/job", p.withLeaderCheck(p.AddJobHandler))
+	mux.HandleFunc("/producer/topic", p.withLeaderCheck(p.AddTopicHandler)) // only admin
+	mux.HandleFunc("/producer/jobs", p.withLeaderCheck(p.AddJobHandler))
 	mux.HandleFunc("/ws", p.WebSocketHandler)
 
 	return &http.Server{
@@ -218,7 +217,6 @@ func (p *ProxyApi) MetricsHandler() http.Handler {
 	return promhttp.Handler()
 }
 
-// AddTopicHandler and AddJobHandler remain exactly as in your original code
 func (p *ProxyApi) AddTopicHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	defer func() {
@@ -227,14 +225,15 @@ func (p *ProxyApi) AddTopicHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Auth check
 	token := extractToken(r)
-	if !p.authenticator.ValidateRole(token, RoleProducer) {
+	if !p.authenticator.ValidateRole(token, RoleAdmin) {
 		p.metrics.AuthFailure()
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	var req model.AddTopicPayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil || req.Topic == "" {
 		p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/topic", "400").Inc()
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -245,7 +244,7 @@ func (p *ProxyApi) AddTopicHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Send to ClusterAgent
 	select {
-	case p.producerCh <- model.ProxyRequestWithRespCh{
+	case p.producerCh <- model.ApiRequestWithRespCh{
 		ProxyRequest: model.ProxyRequest{
 			RequestID: p.nextRequestID(),
 			Type:      model.ReqAddTopic,
@@ -286,7 +285,7 @@ func (p *ProxyApi) AddTopicHandler(w http.ResponseWriter, r *http.Request) {
 func (p *ProxyApi) AddJobHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	defer func() {
-		p.metrics.HTTPRequestDuration.WithLabelValues("POST", "/producer/job").Observe(time.Since(start).Seconds())
+		p.metrics.HTTPRequestDuration.WithLabelValues("POST", "/producer/jobs").Observe(time.Since(start).Seconds())
 	}()
 
 	// Auth check
@@ -297,9 +296,10 @@ func (p *ProxyApi) AddJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req model.AddJobPayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/job", "400").Inc()
+	var req model.AddJobsPayload
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil || req.Topic == "" || len(req.Jobs) == 0 {
+		p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/jobs", "400").Inc()
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -309,11 +309,11 @@ func (p *ProxyApi) AddJobHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Send to ClusterAgent
 	select {
-	case p.producerCh <- model.ProxyRequestWithRespCh{
+	case p.producerCh <- model.ApiRequestWithRespCh{
 		ProxyRequest: model.ProxyRequest{
 			RequestID: p.nextRequestID(),
-			Type:      model.ReqAddJob,
-			AddJob:    &req,
+			Type:      model.ReqAddJobs,
+			AddJobs:   &req,
 		},
 		ToProducerRespCh: respCh,
 	}:
@@ -328,16 +328,16 @@ func (p *ProxyApi) AddJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	case resp := <-respCh:
 		if resp.Status == model.ToProxyRespStatusSuccess {
-			p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/job", "200").Inc()
+			p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/jobs", "200").Inc()
 			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "job_id": req.Job.ID})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "success", "topic": req.Topic})
 		} else {
-			p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/job", "400").Inc()
+			p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/jobs", "400").Inc()
 			http.Error(w, resp.Error, http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": resp.Error})
 		}
 	case <-time.After(30 * time.Second):
-		p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/job", "504").Inc()
+		p.metrics.HTTPRequestsTotal.WithLabelValues("POST", "/producer/jobs", "504").Inc()
 		http.Error(w, "timeout", http.StatusGatewayTimeout)
 	}
 }
@@ -427,7 +427,7 @@ func (p *ProxyApi) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 			consumer.UpdateDeliveryAck(msg.LastID)
 			if msg.Topic != "" && msg.JobID != "" {
 				select {
-				case p.producerCh <- model.ProxyRequestWithRespCh{
+				case p.producerCh <- model.ApiRequestWithRespCh{
 					ProxyRequest: model.ProxyRequest{
 						RequestID: p.nextRequestID(),
 						Type:      model.ReqDone,

@@ -23,19 +23,45 @@ import (
 )
 
 func (a *ClusterAgent) handleResponse(resp *model.ToProducerResponse) {
+	// fist check if request is for other command types
 	a.requestMapMu.Lock()
-	toProducerResponse, ok := a.requestMap[resp.RequestID]
-	if !ok {
-		// done signals do not have response
+	respCh, ok := a.requestMap[resp.RequestID]
+	if ok {
+		delete(a.requestMap, resp.RequestID)
+		a.requestMapMu.Unlock()
+		select {
+		case respCh <- resp:
+		default:
+		}
 		return
 	}
-	delete(a.requestMap, resp.RequestID)
 	a.requestMapMu.Unlock()
 
-	select {
-	case toProducerResponse <- resp:
-	default:
+	// check if the response is for add jobs
+
+	a.requestIdToTopicMu.RLock()
+	topic, ok := a.requestIdToTopic[resp.RequestID]
+	a.requestIdToTopicMu.RUnlock()
+	if !ok {
+		a.logger.Debug("missing dispatcher for request id", zap.Uint32("RequestID", resp.RequestID))
+		return
 	}
+
+	// Find dispatcher and forward response
+	if tb, ok := a.topicJobBuffers.Load(topic); ok {
+		if buffer, ok := tb.(*JobBuffer); ok {
+			select {
+			case buffer.responseInputCh <- resp:
+			default:
+				// channel full, drop or log
+			}
+		}
+	}
+
+	// Cleanup
+	a.requestIdToTopicMu.Lock()
+	delete(a.requestIdToTopic, resp.RequestID)
+	a.requestIdToTopicMu.Unlock()
 }
 
 func (a *ClusterAgent) handleHeartbeat(senderID string, hb *model.ToProxyHeartbeat) {

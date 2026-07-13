@@ -52,7 +52,7 @@ type TestCluster struct {
 type TestNode struct {
 	Name      string
 	APIPort   string // host port
-	ProxyPort string // host port (same as API in your compose)
+	ProxyPort string // host port
 }
 
 func SetupTestCluster(t *testing.T, ctx context.Context, caCertDir, domain string) (*TestCluster, map[string]string, *zap.Logger) {

@@ -60,6 +60,10 @@ func TestFullSystemFlow(t *testing.T) {
 	// ============================================
 	client.ClearTracking()
 
+	// check error on sending jobs to not exist topic
+	err = client.AddJob("order-1", "not-exist-topic", []byte(`{"item":"book"}`))
+	require.Error(t, err, "cluster should return error for add job with invalid topic")
+
 	topic := "orders"
 	consumerID := client.AddConsumer(topic)
 	t.Logf("Subscribed consumer %d to topics: %s", consumerID, topic)
@@ -177,6 +181,66 @@ func TestMultiConsumers(t *testing.T) {
 			"orders",
 			fmt.Appendf(nil, `{"seq":%d}`, i),
 		)
+	}
+
+	client.AssertAllJobsReceivedE2E(t, 10*time.Second)
+
+	// Cleanup
+	for _, consumerID := range consumers {
+		_ = client.StopConsumer(consumerID)
+	}
+}
+
+func TestMultiConsumersBatchJobs(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	domain := "localhost"
+	integrationDir, _ := os.Getwd()
+	caCertDir := filepath.Join(integrationDir, "certs")
+
+	_, cluster, client, _ := SetupFullTestSystem(t, ctx, caCertDir, domain)
+	defer func() { _ = cluster.Terminate(ctx) }()
+
+	// ============================================
+	// Add Topics
+	// ============================================
+	err := client.AddTopic("orders")
+	require.NoError(t, err)
+
+	err = client.AddTopic("shipments")
+	require.NoError(t, err)
+
+	// ============================================
+	// Multiple Consumers on Same Topic
+	// ============================================
+	client.ClearTracking()
+
+	// Add 3 consumers
+	consumers := make([]int, 3)
+	for i := range 3 {
+		consumers[i] = client.AddConsumer("orders")
+	}
+	_ = client.Start()
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Push 500 jobs in 5 batches of 100
+	const numBatches = 5
+	const batchSize = 100
+
+	for b := range numBatches {
+		jobs := make([]JobInput, batchSize)
+		for i := range batchSize {
+			jobNum := b*batchSize + i
+			jobs[i] = JobInput{
+				ID:    fmt.Sprintf("multi-job-%d", jobNum),
+				Topic: "orders",
+				Data:  fmt.Appendf(nil, `{"seq":%d}`, jobNum),
+			}
+		}
+		err := client.AddJobs("orders", jobs)
+		require.NoError(t, err)
 	}
 
 	client.AssertAllJobsReceivedE2E(t, 10*time.Second)

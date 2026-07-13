@@ -40,7 +40,7 @@ func TestNewAuthenticator(t *testing.T) {
 		require.NoError(t, err)
 		defer auth.Close()
 
-		role, ok := auth.Validate("admin123")
+		role, ok := auth.GetRole("admin123")
 		assert.True(t, ok)
 		assert.Equal(t, RoleAdmin, role)
 	})
@@ -82,7 +82,7 @@ func TestAuthenticator_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			role, ok := auth.Validate(tt.token)
+			role, ok := auth.GetRole(tt.token)
 			assert.Equal(t, tt.wantOk, ok)
 			assert.Equal(t, tt.wantRole, role)
 		})
@@ -141,7 +141,7 @@ tokens:
 	require.NoError(t, err)
 	defer auth.Close()
 
-	role, ok := auth.Validate("old-token")
+	role, ok := auth.GetRole("old-token")
 	require.True(t, ok)
 	require.Equal(t, RoleConsumer, role)
 
@@ -155,11 +155,11 @@ tokens:
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		role, ok := auth.Validate("new-token")
+		role, ok := auth.GetRole("new-token")
 		return ok && role == RoleAdmin
 	}, 2*time.Second, 50*time.Millisecond)
 
-	_, ok = auth.Validate("old-token")
+	_, ok = auth.GetRole("old-token")
 	assert.False(t, ok)
 }
 

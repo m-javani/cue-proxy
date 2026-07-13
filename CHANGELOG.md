@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-07-14
+### Changed
+- **BREAKING**: Added add job batch to fix raft message per single job issue
+- changed request ids from string to uint32
+- added job buffer
+ 
 ## [0.3.0] - 2026-07-08
 ### Changed
 - **BREAKING**: Discard resolver and verifier components

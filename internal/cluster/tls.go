@@ -45,7 +45,7 @@ func createTransportConfig() *quic.Config {
 
 		// ---- Connection Limits ----
 		// High TPS means many concurrent streams.
-		// If each request maps to a stream, set this to your expected concurrency.
+		// If each request maps to a stream, set this to the expected concurrency.
 		MaxIncomingStreams:    10_000,
 		MaxIncomingUniStreams: 0, // Set only if you use unidirectional streams
 
