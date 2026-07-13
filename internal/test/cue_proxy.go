@@ -41,7 +41,7 @@ func StartProxy(t *testing.T, ctx context.Context, logger *zap.Logger, proxyIdUi
 	proxyID = fmt.Sprintf("proxy%d", proxyIdUint8)
 
 	// Load proxy config (separate from cluster)
-	cfg, err := config.LoadConfig("./configs/config.yml") // your proxy config
+	cfg, err := config.LoadConfig("./configs/config.yml")
 	require.NoError(t, err)
 	cfg.ProxyID = proxyID
 

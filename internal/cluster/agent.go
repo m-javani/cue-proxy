@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,19 +72,26 @@ type ClusterAgent struct {
 	metrics *internal.ClusterMetrics
 
 	// Upper layer integration
-	producerCh <-chan model.ProxyRequestWithRespCh
+	producerCh <-chan model.ApiRequestWithRespCh
 
-	// In-flight producer requests
-	requestMap     map[string]chan<- *model.ToProducerResponse
+	// keep track of add topic request
+	requestMap     map[uint32]chan<- *model.ToProducerResponse
 	requestMapMu   sync.RWMutex
 	requestCounter atomic.Uint32
+
+	// keep track of producer add job requests
+	jobsRequestCounter *atomic.Uint32
+	topicJobBuffers    sync.Map
+	requestIdToTopic   map[uint32]string
+	requestIdToTopicMu sync.RWMutex
+	sendJobsCh         chan model.ProxyRequest
 
 	router api.Router
 
 	doneCmdBatchMu     sync.Mutex
 	doneCmdBatchBuffer map[string][]string // topic -> jobIDs
 
-	reqIDCounter atomic.Uint64
+	reqIDCounter atomic.Uint32
 }
 
 const (
@@ -98,7 +104,7 @@ func NewClusterAgent(
 	quicAddr string,
 	quicPort uint16,
 	certPath, keyPath, caCertPath string,
-	producerCh <-chan model.ProxyRequestWithRespCh,
+	producerCh <-chan model.ApiRequestWithRespCh,
 	router api.Router,
 	discovery map[string]PeerInfo,
 	logger *zap.Logger,
@@ -129,7 +135,6 @@ func NewClusterAgent(
 		recvConns:       make(map[string]*quic.Conn),
 		addressToNode:   make(map[string]string),
 		nodeToAddr:      make(map[string]string),
-		requestMap:      make(map[string]chan<- *model.ToProducerResponse),
 		producerCh:      producerCh,
 		metrics:         internal.GetClusterMetrics(),
 		router:          router,
@@ -145,16 +150,22 @@ func NewClusterAgent(
 		currentLeader:      atomic.Value{},
 		leaderAvailable:    leaderAvailable,
 		topologyMu:         sync.RWMutex{},
-		requestMapMu:       sync.RWMutex{},
-		requestCounter:     atomic.Uint32{},
 		doneCmdBatchMu:     sync.Mutex{},
 		doneCmdBatchBuffer: make(map[string][]string, 0),
-		reqIDCounter:       atomic.Uint64{},
+		reqIDCounter:       atomic.Uint32{},
 		discoveryMu:        sync.RWMutex{},
 		discoveryKind:      discoveryKind,
 		discoveryYMLPath:   discoveryYMLPath,
 		discoveryHTTPHost:  discoveryHTTPHost,
 		discovering:        atomic.Bool{},
+		topicJobBuffers:    sync.Map{},
+		sendJobsCh:         make(chan model.ProxyRequest, 128),
+		requestIdToTopic:   make(map[uint32]string, 512),
+		requestIdToTopicMu: sync.RWMutex{},
+		jobsRequestCounter: &atomic.Uint32{},
+		requestMap:         make(map[uint32]chan<- *model.ToProducerResponse, 0),
+		requestMapMu:       sync.RWMutex{},
+		requestCounter:     atomic.Uint32{},
 	}
 
 	agent.currentLeader.Store("")
@@ -162,8 +173,8 @@ func NewClusterAgent(
 	return agent, nil
 }
 
-func (a *ClusterAgent) nextRequestID() string {
-	return strconv.FormatUint(a.reqIDCounter.Add(1), 36)
+func (a *ClusterAgent) nextRequestID() uint32 {
+	return a.reqIDCounter.Add(1)
 }
 
 // Run starts background tasks (call from main)
@@ -184,6 +195,9 @@ func (a *ClusterAgent) Run() {
 
 	wg.Add(1)
 	go a.syncPeers(&wg, 2*time.Second)
+
+	wg.Add(1)
+	go a.sendJobsHandler(&wg)
 
 	a.logger.Info("ClusterAgent started", zap.String("proxy_id", a.proxyID))
 

@@ -157,22 +157,33 @@ func TestLimitedVolumeProducers(t *testing.T) {
 	start := time.Now()
 
 	const NUM_JOBS int = 4000
-	// Send 100 jobs
+	const BATCH_SIZE int = 100
+
+	// Build and send batches
+	batches := make([][]JobInput, 0, (NUM_JOBS+BATCH_SIZE-1)/BATCH_SIZE)
+	for i := range NUM_JOBS {
+		batchIdx := i / BATCH_SIZE
+		if len(batches) <= batchIdx {
+			batches = append(batches, []JobInput{})
+		}
+		batches[batchIdx] = append(batches[batchIdx], JobInput{
+			ID:    fmt.Sprintf("bulk-%d", i),
+			Topic: "high-volume",
+			Data:  fmt.Appendf(nil, `{"id":%d}`, i),
+		})
+	}
+
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 20)
-	for i := range NUM_JOBS {
+	for _, batch := range batches {
 		wg.Add(1)
 		sem <- struct{}{}
 
-		go func(i int) {
+		go func(jobs []JobInput) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			client.AddJob(
-				fmt.Sprintf("bulk-%d", i),
-				"high-volume",
-				fmt.Appendf(nil, `{"id":%d}`, i),
-			)
-		}(i)
+			client.AddJobs("high-volume", jobs)
+		}(batch)
 	}
 
 	success := client.WaitForProducerResponses(t, 60*time.Second)
@@ -183,5 +194,4 @@ func TestLimitedVolumeProducers(t *testing.T) {
 	logger.Sugar().Infof("Throughput: %.2f jobs/sec", float64(NUM_JOBS)/elapsed)
 
 	wg.Wait()
-
 }

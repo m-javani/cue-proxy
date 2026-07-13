@@ -16,7 +16,6 @@ coverage.*
 *.prof
 tmp/
 *.tmp
-build/
 dist/
 
 # IDE
@@ -50,6 +49,7 @@ Dockerfile.local
 *.local
 
 # Binaries
+build/
 cue
 cueproxy
 *.exe

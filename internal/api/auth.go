@@ -145,7 +145,7 @@ func getDir(path string) string {
 	return filepath.Dir(path)
 }
 
-func (a *Authenticator) Validate(token string) (Role, bool) {
+func (a *Authenticator) GetRole(token string) (Role, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	role, ok := a.tokens[token]
@@ -153,7 +153,7 @@ func (a *Authenticator) Validate(token string) (Role, bool) {
 }
 
 func (a *Authenticator) ValidateRole(token string, required Role) bool {
-	role, ok := a.Validate(token)
+	role, ok := a.GetRole(token)
 	if !ok {
 		return false
 	}

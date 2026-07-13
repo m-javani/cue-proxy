@@ -19,17 +19,17 @@ type ProxyRequestType uint8
 const (
 	ReqHeartbeatReport ProxyRequestType = iota
 	ReqAddTopic
-	ReqAddJob
+	ReqAddJobs
 	ReqDone
 )
 
 type ProxyRequest struct {
-	RequestID string           `msgpack:"request_id"`
+	RequestID uint32           `msgpack:"request_id"`
 	Type      ProxyRequestType `msgpack:"type"`
 
 	AddTopic        *AddTopicPayload `msgpack:"add_topic,omitempty"`
 	HeartbeatReport *HeartbeatReport `msgpack:"heartbeat_report,omitempty"`
-	AddJob          *AddJobPayload   `msgpack:"add_job,omitempty"`
+	AddJobs         *AddJobsPayload  `msgpack:"add_job,omitempty"`
 	Done            *DonePayload     `msgpack:"done,omitempty"`
 }
 
@@ -48,8 +48,9 @@ type TopicCapacity struct {
 	ConsumptionScore int    `msgpack:"consumption_score"`
 }
 
-type AddJobPayload struct {
-	Job Job `msgpack:"job"`
+type AddJobsPayload struct {
+	Topic string `msgpack:"topic"`
+	Jobs  []*Job `msgpack:"jobs"`
 }
 
 type DonePayload struct {
@@ -84,14 +85,25 @@ type ToProducerRespStatus string
 const (
 	ToProxyRespStatusSuccess ToProducerRespStatus = "success"
 	ToProxyRespStatusError   ToProducerRespStatus = "error"
-	ToProxyRespStatusExist   ToProducerRespStatus = "exist"
 )
 
+const (
+	FailDuplicate int = 1
+	FailQueueFull int = 2
+	FailInternal  int = 3
+)
+
+// ToProducerResponse to proxy (outbound)
+type JobFailure struct {
+	JobID  string `json:"job_id"`
+	Reason int    `json:"reason"`
+}
+
 type ToProducerResponse struct {
-	// cluster agent adds this not top level
-	RequestID string               `msgpack:"request_id"`
-	Status    ToProducerRespStatus `msgpack:"status"`
-	Error     string               `msgpack:"error,omitempty"`
+	RequestID uint32               `json:"request_id"`
+	Status    ToProducerRespStatus `json:"status"`
+	Error     string               `json:"error"`
+	Failures  []JobFailure         `json:"failures,omitempty"`
 }
 
 type ToConsumerMessage struct {
@@ -129,7 +141,7 @@ type ToProxyHeartbeat struct {
 	Term       uint64   `msgpack:"term"`
 }
 
-type ProxyRequestWithRespCh struct {
+type ApiRequestWithRespCh struct {
 	ProxyRequest     ProxyRequest
 	ToProducerRespCh chan<- *ToProducerResponse
 }

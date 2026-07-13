@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -51,16 +52,18 @@ type ReceivedJob struct {
 // ─── ProducerClient ──────────────────────────────────────────────────────────
 
 type ProducerClient struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL    string
+	token      string
+	adminToken string
+	client     *http.Client
 }
 
-func NewProducerClient(baseURL, token string) *ProducerClient {
+func NewProducerClient(baseURL, token, adminToken string) *ProducerClient {
 	return &ProducerClient{
-		baseURL: baseURL,
-		token:   token,
-		client:  &http.Client{Timeout: 5 * time.Second},
+		baseURL:    baseURL,
+		token:      token,
+		adminToken: adminToken,
+		client:     &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -77,7 +80,12 @@ func (p *ProducerClient) doPost(path string, body any) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+p.token)
+	token := p.token
+	if strings.Contains(path, "/topic") {
+		token = p.adminToken
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	return p.client.Do(req)
 }
@@ -94,21 +102,47 @@ func (p *ProducerClient) AddTopic(topic string) error {
 	return nil
 }
 
+// AddJob sends a single job (wraps AddJobs with batch size 1)
 func (p *ProducerClient) AddJob(jobID, topic string, data []byte) (int, error) {
-	job := map[string]any{
-		"job": map[string]any{
-			"id":    jobID,
-			"topic": topic,
-			"data":  data,
-		},
+	return p.AddJobs(topic, []JobInput{
+		{ID: jobID, Topic: topic, Data: data},
+	})
+}
+
+// JobInput represents a single job for batch submission
+type JobInput struct {
+	ID    string
+	Topic string
+	Data  []byte
+}
+
+// AddJobs sends a batch of jobs to /producer/jobs
+func (p *ProducerClient) AddJobs(topic string, jobs []JobInput) (int, error) {
+	if len(jobs) == 0 {
+		return 0, fmt.Errorf("no jobs to send")
 	}
-	resp, err := p.doPost("/producer/job", job)
+
+	jobList := make([]map[string]any, len(jobs))
+	for i, j := range jobs {
+		jobList[i] = map[string]any{
+			"id":    j.ID,
+			"topic": j.Topic,
+			"data":  j.Data,
+		}
+	}
+
+	reqBody := map[string]any{
+		"topic": topic,
+		"jobs":  jobList,
+	}
+
+	resp, err := p.doPost("/producer/jobs", reqBody)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return resp.StatusCode, fmt.Errorf("add job failed: %s", resp.Status)
+		return resp.StatusCode, fmt.Errorf("add jobs failed: %s", resp.Status)
 	}
 	return resp.StatusCode, nil
 }
@@ -193,7 +227,7 @@ type Client struct {
 
 func NewClient(producerURL, consumerURL string, logger *zap.Logger) *Client {
 	return &Client{
-		producer:      NewProducerClient(producerURL, "prod_abc123"),
+		producer:      NewProducerClient(producerURL, "prod_abc123", "admin_2024"),
 		consumerURL:   consumerURL,
 		consumerToken: "cons_xyz789",
 		consumers:     make(map[int]*consumer),
@@ -209,6 +243,7 @@ func (c *Client) AddTopic(topic string) error {
 }
 
 // AddJob adds a new job via the producer API
+// AddJob adds a single job via the producer API
 func (c *Client) AddJob(jobID, topic string, data []byte) error {
 	statusCode, err := c.producer.AddJob(jobID, topic, data)
 	if err != nil {
@@ -225,6 +260,36 @@ func (c *Client) AddJob(jobID, topic string, data []byte) error {
 	}
 	if statusCode == http.StatusOK {
 		c.httpResponses[jobID] = true
+	}
+	c.trackingMu.Unlock()
+	return nil
+}
+
+// AddJobs adds a batch of jobs via the producer API
+func (c *Client) AddJobs(topic string, jobs []JobInput) error {
+	if len(jobs) == 0 {
+		return fmt.Errorf("no jobs to send")
+	}
+
+	statusCode, err := c.producer.AddJobs(topic, jobs)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	c.trackingMu.Lock()
+	for _, j := range jobs {
+		c.sentJobs[j.ID] = SentJob{
+			JobID:     j.ID,
+			Topic:     j.Topic,
+			Data:      j.Data,
+			Received:  false,
+			RespTime:  now,
+			ResStatus: statusCode,
+		}
+		if statusCode == http.StatusOK {
+			c.httpResponses[j.ID] = true
+		}
 	}
 	c.trackingMu.Unlock()
 	return nil

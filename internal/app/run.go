@@ -29,14 +29,14 @@ import (
 	"go.uber.org/zap"
 )
 
-const ProducerReqBufferSize int = 1000
+const ProducerReqBufferSize int = 10240
 
 // RunProxy starts the proxy with the given configuration and logger.
 // It blocks until the context is cancelled or a fatal error occurs.
 func RunProxy(ctx context.Context, cfg *config.Config, logger *zap.Logger, leaderAvailable *atomic.Bool, discovery map[string]cluster.PeerInfo) error {
 
 	// Create communication channels
-	producerCh := make(chan model.ProxyRequestWithRespCh, ProducerReqBufferSize)
+	producerCh := make(chan model.ApiRequestWithRespCh, ProducerReqBufferSize)
 
 	// Create authenticator
 	auth, err := api.NewAuthenticator(cfg.API.AuthPath, logger)

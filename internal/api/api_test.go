@@ -110,7 +110,7 @@ func (r *FakeRouter) GetConsumerCount(topic string) int {
 // SIMPLE FAKE CLUSTER AGENT
 // ============================================
 type FakeClusterAgent struct {
-	producerCh    <-chan model.ProxyRequestWithRespCh
+	producerCh    <-chan model.ApiRequestWithRespCh
 	mu            sync.Mutex
 	stopCh        chan struct{}
 	wg            sync.WaitGroup
@@ -126,7 +126,7 @@ const (
 	ModeTimeout = 2
 )
 
-func NewFakeClusterAgent(producerCh <-chan model.ProxyRequestWithRespCh) *FakeClusterAgent {
+func NewFakeClusterAgent(producerCh <-chan model.ApiRequestWithRespCh) *FakeClusterAgent {
 	agent := &FakeClusterAgent{
 		producerCh:  producerCh,
 		stopCh:      make(chan struct{}),
@@ -259,7 +259,7 @@ type APITester struct {
 	api             *api.ProxyApi
 	router          *FakeRouter
 	clusterAgent    *FakeClusterAgent
-	producerCh      chan model.ProxyRequestWithRespCh
+	producerCh      chan model.ApiRequestWithRespCh
 	auth            *api.Authenticator
 	leaderAvailable *atomic.Bool
 	logger          *zap.Logger
@@ -323,7 +323,7 @@ func NewAPITester(t *testing.T, opts ...APITesterOption) *APITester {
 		ctx:             ctx,
 		cancel:          cancel,
 		router:          NewFakeRouter(),
-		producerCh:      make(chan model.ProxyRequestWithRespCh, 100),
+		producerCh:      make(chan model.ApiRequestWithRespCh, 10240),
 		leaderAvailable: &atomic.Bool{},
 		logger:          logger,
 		metrics:         metrics,
@@ -446,8 +446,11 @@ func (t *APITester) AddTopic(topic string, user string) *http.Response {
 // AddJob helper - uses real model
 func (t *APITester) AddJob(job model.Job, user string) *http.Response {
 	t.t.Helper()
-	payload := model.AddJobPayload{Job: job}
-	return t.DoRequestWithToken("POST", "/producer/job", payload, user)
+	payload := model.AddJobsPayload{
+		Topic: job.Topic,
+		Jobs:  []*model.Job{&job},
+	}
+	return t.DoRequestWithToken("POST", "/producer/jobs", payload, user)
 }
 
 // ============================================
@@ -616,7 +619,7 @@ func testAddJobSuccess(t *testing.T) {
 	err := json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 	assert.Equal(t, "success", result["status"])
-	assert.Equal(t, "job-1", result["job_id"])
+	assert.Equal(t, "test-topic", result["topic"])
 }
 
 func testAddJobUnauthorized(t *testing.T) {
